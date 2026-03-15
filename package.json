@@ -1,0 +1,14 @@
+{
+  "name": "accessibility-broadcast",
+  "version": "0.1.0",
+  "description": "Standalone real-time accessibility broadcast pipeline",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "start:model-gateway": "node examples/model-gateway/server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

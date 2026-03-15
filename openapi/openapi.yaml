@@ -1,0 +1,772 @@
+openapi: 3.1.0
+info:
+  title: Accessibility Broadcast API
+  version: 0.1.0
+  description: Standalone APIs for live stream accessibility outputs and viewer personalization.
+servers:
+  - url: http://localhost:3000
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: OK
+  /v1/streams:
+    post:
+      summary: Create stream session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateStreamRequest'
+      responses:
+        '201':
+          description: Stream created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Stream'
+  /v1/streams/{id}/start:
+    post:
+      summary: Start stream ingest and pipeline
+      parameters:
+        - $ref: '#/components/parameters/StreamId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartStreamRequest'
+      responses:
+        '200':
+          description: Stream started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StartStreamResponse'
+  /v1/streams/{id}/stop:
+    post:
+      summary: Stop stream
+      parameters:
+        - $ref: '#/components/parameters/StreamId'
+      responses:
+        '200':
+          description: Stream stopped
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Stream'
+  /v1/streams/{id}/captions:
+    get:
+      summary: Get captions
+      parameters:
+        - $ref: '#/components/parameters/StreamId'
+        - in: query
+          name: format
+          schema:
+            type: string
+            enum: [vtt, ttml]
+        - in: query
+          name: language
+          schema:
+            type: string
+        - in: query
+          name: viewer_id
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Captions payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaptionsResponse'
+  /v1/streams/{id}/audio-description:
+    get:
+      summary: Get audio description metadata + segments
+      parameters:
+        - $ref: '#/components/parameters/StreamId'
+        - in: query
+          name: viewer_id
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Audio description payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AudioDescriptionResponse'
+  /v1/streams/{id}/sign-overlay:
+    get:
+      summary: Get sign overlay metadata + script
+      parameters:
+        - $ref: '#/components/parameters/StreamId'
+        - in: query
+          name: viewer_id
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Sign overlay payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SignOverlayResponse'
+  /v1/streams/{id}/events:
+    get:
+      summary: Get accessibility timeline events
+      parameters:
+        - $ref: '#/components/parameters/StreamId'
+      responses:
+        '200':
+          description: Event timeline
+  /v1/streams/{id}/health:
+    get:
+      summary: Get stream health
+      parameters:
+        - $ref: '#/components/parameters/StreamId'
+      responses:
+        '200':
+          description: Stream health
+  /v1/streams/{id}/feedback-summary:
+    get:
+      summary: Get feedback summary for stream
+      parameters:
+        - $ref: '#/components/parameters/StreamId'
+      responses:
+        '200':
+          description: Feedback summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackSummary'
+  /v1/viewers:
+    post:
+      summary: Create viewer profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ViewerProfileInput'
+      responses:
+        '201':
+          description: Viewer created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ViewerProfile'
+  /v1/viewers/{id}:
+    get:
+      summary: Get viewer profile
+      parameters:
+        - $ref: '#/components/parameters/ViewerId'
+      responses:
+        '200':
+          description: Viewer profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ViewerProfile'
+  /v1/viewers/{id}/preferences:
+    get:
+      summary: Get viewer preferences + supported options
+      parameters:
+        - $ref: '#/components/parameters/ViewerId'
+      responses:
+        '200':
+          description: Viewer preferences
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ViewerPreferencesResponse'
+    patch:
+      summary: Update viewer preferences
+      parameters:
+        - $ref: '#/components/parameters/ViewerId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ViewerPreferencesPatch'
+      responses:
+        '200':
+          description: Viewer updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ViewerProfile'
+  /v1/accessibility/coverage:
+    get:
+      summary: Supported accessibility capabilities
+      responses:
+        '200':
+          description: Coverage metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessibilityCoverage'
+  /v1/accessibility/resources:
+    get:
+      summary: Curated accessibility resources
+      responses:
+        '200':
+          description: Resources list
+  /v1/feedback:
+    post:
+      summary: Submit viewer feedback
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FeedbackInput'
+      responses:
+        '201':
+          description: Feedback created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackItem'
+  /v1/incidents:
+    get:
+      summary: List incidents
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [open, resolved]
+      responses:
+        '200':
+          description: Incident list
+  /v1/incidents/{id}/resolve:
+    post:
+      summary: Resolve incident
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveIncidentRequest'
+      responses:
+        '200':
+          description: Incident resolved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Incident'
+  /v1/ad/sessions:
+    post:
+      summary: Create ad integration session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdSessionInput'
+      responses:
+        '201':
+          description: Session created
+  /v1/ad/sessions/{id}/events:
+    post:
+      summary: Log ad session event
+      parameters:
+        - $ref: '#/components/parameters/AdSessionId'
+      responses:
+        '201':
+          description: Event logged
+  /v1/ad/sessions/{id}:
+    get:
+      summary: Get ad session
+      parameters:
+        - $ref: '#/components/parameters/AdSessionId'
+      responses:
+        '200':
+          description: Session detail
+  /v1/ad/sessions/{id}/tag:
+    get:
+      summary: Get ad embed tag metadata
+      parameters:
+        - $ref: '#/components/parameters/AdSessionId'
+      responses:
+        '200':
+          description: Tag payload
+  /v1/ad/sessions/{id}/report:
+    get:
+      summary: Get ad session report
+      parameters:
+        - $ref: '#/components/parameters/AdSessionId'
+      responses:
+        '200':
+          description: Session report
+  /v1/ad/campaigns/{campaignId}/report:
+    get:
+      summary: Get campaign report
+      parameters:
+        - in: path
+          name: campaignId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Campaign report
+components:
+  parameters:
+    StreamId:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: string
+    ViewerId:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: string
+    AdSessionId:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: string
+  schemas:
+    CreateStreamRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        output_languages:
+          type: array
+          items:
+            type: string
+        sign_languages:
+          type: array
+          items:
+            type: string
+        sign_presentation_mode:
+          type: string
+          enum: [avatar_2d, basic_signs_book]
+        signer_profile:
+          type: string
+        target_latency_seconds:
+          type: integer
+        model_provider:
+          type: string
+          enum: [mock, http]
+    StartStreamRequest:
+      type: object
+      required: [protocol, source_url]
+      properties:
+        protocol:
+          type: string
+          enum: [rtmp, srt]
+        source_url:
+          type: string
+        transport:
+          type: string
+        camera_id:
+          type: string
+        model_provider:
+          type: string
+          enum: [mock, http]
+        model_base_url:
+          type: string
+        model_api_key:
+          type: string
+        model_timeout_ms:
+          type: integer
+        output_languages:
+          type: array
+          items:
+            type: string
+        sign_languages:
+          type: array
+          items:
+            type: string
+        sign_presentation_mode:
+          type: string
+          enum: [avatar_2d, basic_signs_book]
+        accessibility_profiles:
+          type: array
+          items:
+            type: string
+        mock_timeline:
+          type: array
+          items:
+            type: object
+    StartStreamResponse:
+      type: object
+      properties:
+        stream:
+          $ref: '#/components/schemas/Stream'
+        generated:
+          type: object
+    Stream:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+        output_languages:
+          type: array
+          items:
+            type: string
+        sign_languages:
+          type: array
+          items:
+            type: string
+        sign_presentation_mode:
+          type: string
+        signer_profile:
+          type: string
+    CaptionSegment:
+      type: object
+      properties:
+        id:
+          type: string
+        start:
+          type: string
+        end:
+          type: string
+        text:
+          type: string
+        speaker:
+          type: string
+        confidence:
+          type: number
+    AudioDescriptionSegment:
+      type: object
+      properties:
+        id:
+          type: string
+        start:
+          type: string
+        end:
+          type: string
+        text:
+          type: string
+        confidence:
+          type: number
+    SignScriptSegment:
+      type: object
+      properties:
+        id:
+          type: string
+        start:
+          type: string
+        end:
+          type: string
+        gloss_tokens:
+          type: array
+          items:
+            type: string
+        facial_cues:
+          type: array
+          items:
+            type: string
+        confidence:
+          type: number
+        fallback_text:
+          type: string
+    SignCardSegment:
+      type: object
+      properties:
+        id:
+          type: string
+        start:
+          type: string
+        end:
+          type: string
+        signs:
+          type: array
+          items:
+            type: object
+        confidence:
+          type: number
+        fallback_text:
+          type: string
+    CaptionsResponse:
+      type: object
+      properties:
+        stream_id:
+          type: string
+        viewer_id:
+          type: string
+          nullable: true
+        language:
+          type: string
+        caption_style:
+          type: string
+        format:
+          type: string
+        captions:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaptionSegment'
+        rendered:
+          type: string
+    AudioDescriptionResponse:
+      type: object
+      properties:
+        stream_id:
+          type: string
+        viewer_id:
+          type: string
+          nullable: true
+        audio_description_style:
+          type: string
+        stream_url:
+          type: string
+        segments:
+          type: array
+          items:
+            $ref: '#/components/schemas/AudioDescriptionSegment'
+    SignOverlayResponse:
+      type: object
+      properties:
+        stream_id:
+          type: string
+        viewer_id:
+          type: string
+          nullable: true
+        sign_language:
+          type: string
+        sign_presentation_mode:
+          type: string
+        signer_profile:
+          type: string
+        overlay_url:
+          type: string
+        render_strategy:
+          type: string
+        segments:
+          type: array
+          items:
+            $ref: '#/components/schemas/SignScriptSegment'
+        sign_cards:
+          type: array
+          items:
+            $ref: '#/components/schemas/SignCardSegment'
+    ViewerPreferences:
+      type: object
+      properties:
+        caption_language:
+          type: string
+        caption_style:
+          type: string
+        audio_description_style:
+          type: string
+        sign_language:
+          type: string
+        sign_presentation_mode:
+          type: string
+        signer_profile:
+          type: string
+        ui_mode:
+          type: string
+        impairment_tags:
+          type: array
+          items:
+            type: string
+    ViewerProfileInput:
+      type: object
+      required: [stream_id]
+      properties:
+        stream_id:
+          type: string
+        display_name:
+          type: string
+        preferences:
+          $ref: '#/components/schemas/ViewerPreferences'
+    ViewerPreferencesPatch:
+      type: object
+      properties:
+        display_name:
+          type: string
+        preferences:
+          $ref: '#/components/schemas/ViewerPreferences'
+        caption_language:
+          type: string
+        caption_style:
+          type: string
+        audio_description_style:
+          type: string
+        sign_language:
+          type: string
+        sign_presentation_mode:
+          type: string
+        signer_profile:
+          type: string
+        ui_mode:
+          type: string
+        impairment_tags:
+          type: array
+          items:
+            type: string
+    ViewerProfile:
+      type: object
+      properties:
+        id:
+          type: string
+        stream_id:
+          type: string
+        display_name:
+          type: string
+          nullable: true
+        preferences:
+          $ref: '#/components/schemas/ViewerPreferences'
+    ViewerPreferencesResponse:
+      type: object
+      properties:
+        viewer_id:
+          type: string
+        stream_id:
+          type: string
+        preferences:
+          $ref: '#/components/schemas/ViewerPreferences'
+        supported:
+          type: object
+    FeedbackInput:
+      type: object
+      required: [stream_id, message]
+      properties:
+        stream_id:
+          type: string
+        ad_session_id:
+          type: string
+        viewer_id:
+          type: string
+        source:
+          type: string
+        rating:
+          type: integer
+        issue_type:
+          type: string
+        impairment_type:
+          type: string
+        message:
+          type: string
+        contact:
+          type: string
+    FeedbackItem:
+      type: object
+      properties:
+        id:
+          type: string
+        stream_id:
+          type: string
+    FeedbackSummary:
+      type: object
+      properties:
+        stream_id:
+          type: string
+        total:
+          type: integer
+        avg_rating:
+          type: number
+          nullable: true
+        by_issue_type:
+          type: object
+        by_impairment_type:
+          type: object
+        recent:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeedbackItem'
+    Incident:
+      type: object
+      properties:
+        id:
+          type: string
+        stream_id:
+          type: string
+        segment_id:
+          type: string
+        status:
+          type: string
+        reason:
+          type: string
+    ResolveIncidentRequest:
+      type: object
+      required: [resolution]
+      properties:
+        resolution:
+          type: string
+        assigned_to:
+          type: string
+        corrected_text:
+          type: string
+    AccessibilityCoverage:
+      type: object
+      properties:
+        supported_output_languages:
+          type: array
+          items:
+            type: string
+        supported_sign_languages:
+          type: array
+          items:
+            type: string
+        supported_sign_presentation_modes:
+          type: array
+          items:
+            type: string
+        supported_accessibility_profiles:
+          type: array
+          items:
+            type: string
+        supported_impairment_types:
+          type: array
+          items:
+            type: string
+        supported_caption_styles:
+          type: array
+          items:
+            type: string
+        supported_audio_description_styles:
+          type: array
+          items:
+            type: string
+        supported_ui_modes:
+          type: array
+          items:
+            type: string
+    AdSessionInput:
+      type: object
+      required: [stream_id, ad_campaign_id]
+      properties:
+        stream_id:
+          type: string
+        ad_campaign_id:
+          type: string
+        ad_break_id:
+          type: string
+        creative_id:
+          type: string
+        placement_id:
+          type: string
+        platform_type:
+          type: string
+        locale:
+          type: string
+        overlay_mode:
+          type: string
+        safe_zone:
+          type: object

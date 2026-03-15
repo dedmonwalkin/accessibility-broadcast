@@ -1,0 +1,21 @@
+{
+  "name": "@accessibility-broadcast/sdk",
+  "version": "0.1.0",
+  "description": "JS SDK for the Accessibility Broadcast API",
+  "type": "module",
+  "main": "index.cjs",
+  "module": "index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js",
+      "require": "./index.cjs"
+    }
+  },
+  "files": [
+    "index.js",
+    "index.cjs",
+    "index.d.ts"
+  ]
+}
