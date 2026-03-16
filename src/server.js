@@ -9,6 +9,7 @@ import { feedbackService } from './services/feedbackService.js';
 import { adIntegrationService } from './services/adIntegrationService.js';
 import { accessibilityService } from './services/accessibilityService.js';
 import { streamingUiService } from './services/streamingUiService.js';
+import { streamEmitter } from './services/streamingService.js';
 import { persistenceService } from './services/persistence/persistenceService.js';
 import { runtimeConfig } from './config/runtime.js';
 
@@ -45,6 +46,7 @@ function isPublicPath(method, pathname) {
   if (pathname === '/feedback') return true;
   if (pathname.startsWith('/viewer/')) return true;
   if (pathname === '/v1/embed/overlay.js') return true;
+  if (pathname.startsWith('/v1/streams/') && pathname.endsWith('/events/stream')) return true;
   return false;
 }
 
@@ -138,6 +140,26 @@ async function route(req, res) {
     if (method === 'GET' && streamSign) {
       const viewerId = url.searchParams.get('viewer_id');
       return sendJson(res, 200, streamingService.getSignOverlay(streamSign.id, { viewer_id: viewerId }));
+    }
+
+    const streamSse = extractParams(pathname, '/v1/streams/:id/events/stream');
+    if (method === 'GET' && streamSse) {
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no'
+      });
+      res.write(': connected\n\n');
+
+      function onEvent(data) {
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+      }
+
+      const eventKey = `stream:${streamSse.id}`;
+      streamEmitter.on(eventKey, onEvent);
+      req.on('close', () => streamEmitter.off(eventKey, onEvent));
+      return;
     }
 
     const streamEvents = extractParams(pathname, '/v1/streams/:id/events');

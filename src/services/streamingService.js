@@ -1,6 +1,10 @@
+import { EventEmitter } from 'node:events';
 import { store } from '../data/store.js';
 import { assertRequired } from '../utils/validation.js';
 import { createModelProvider } from './providers/modelProvider.js';
+
+export const streamEmitter = new EventEmitter();
+streamEmitter.setMaxListeners(200);
 import {
   SUPPORTED_ACCESSIBILITY_PROFILES,
   SUPPORTED_AUDIO_DESCRIPTION_STYLES,
@@ -265,6 +269,14 @@ async function runPipeline({ stream, timeline, providerConfig }) {
 
     events.push(accessibility);
     signScript.push(sign);
+
+    streamEmitter.emit(`stream:${stream.id}`, {
+      type: 'segment',
+      stream_id: stream.id,
+      segment: toCaptionSegment(accessibility),
+      audio_description: toAudioDescriptionSegment(accessibility),
+      sign
+    });
   }
 
   return {
@@ -416,6 +428,7 @@ export const streamingService = {
     stream.updatedAt = store.nowIso();
 
     store.log('stream.stopped', { streamId: id });
+    streamEmitter.emit(`stream:${id}`, { type: 'stream.stopped', stream_id: id });
     return stream;
   },
 

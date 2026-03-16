@@ -123,26 +123,56 @@ export const streamingUiService = {
       document.getElementById('feedbackQr').src = qrUrl;
       document.getElementById('feedbackLink').href = feedbackUrl;
 
-      async function load() {
+      const captionLines = [];
+      const audioLines = [];
+      const signLines = [];
+
+      function renderPanels() {
+        document.getElementById('captions').textContent = captionLines.join('\n') || 'Waiting for captions...';
+        document.getElementById('signScript').textContent = signLines.join('\n') || 'Waiting for sign-script segments...';
+        document.getElementById('audio').textContent = audioLines.join('\n') || 'Waiting for audio-description segments...';
+      }
+
+      async function initialLoad() {
         const [captions, signOverlay, audio] = await Promise.all([
           fetch('/v1/streams/' + streamId + '/captions' + viewerQuery).then((r) => r.json()),
           fetch('/v1/streams/' + streamId + '/sign-overlay' + viewerQuery).then((r) => r.json()),
           fetch('/v1/streams/' + streamId + '/audio-description' + viewerQuery).then((r) => r.json())
         ]);
-
-        const captionLines = captions.captions.map((s) => '[' + s.start + '] ' + s.text).join('\n');
-        const signLines = signOverlay.segments
-          .map((s) => '[' + s.start + '] ' + s.gloss_tokens.join(' '))
-          .join('\n');
-        const audioLines = audio.segments.map((s) => '[' + s.start + '] ' + s.text).join('\n');
-
-        document.getElementById('captions').textContent = captionLines || 'No captions yet.';
-        document.getElementById('signScript').textContent = signLines || 'No sign-script segments yet.';
-        document.getElementById('audio').textContent = audioLines || 'No audio-description segments yet.';
+        captions.captions.forEach((s) => captionLines.push('[' + s.start + '] ' + s.text));
+        signOverlay.segments.forEach((s) => signLines.push('[' + s.start + '] ' + s.gloss_tokens.join(' ')));
+        audio.segments.forEach((s) => audioLines.push('[' + s.start + '] ' + s.text));
+        renderPanels();
       }
-      load().catch((error) => {
-        document.getElementById('captions').textContent = error.message;
-      });
+
+      const sse = new EventSource('/v1/streams/' + streamId + '/events/stream');
+      sse.onmessage = function (e) {
+        try {
+          const data = JSON.parse(e.data);
+          if (data.type === 'segment') {
+            captionLines.push('[' + data.segment.start + '] ' + data.segment.text);
+            audioLines.push('[' + data.audio_description.start + '] ' + data.audio_description.text);
+            if (data.sign && data.sign.gloss_tokens) {
+              signLines.push('[' + data.sign.start + '] ' + data.sign.gloss_tokens.join(' '));
+            }
+            renderPanels();
+          } else if (data.type === 'stream.stopped') {
+            document.getElementById('captions').textContent += '\n[stream stopped]';
+            sse.close();
+          }
+        } catch (_) {}
+      };
+      sse.onerror = function () {
+        if (!captionLines.length) {
+          document.getElementById('captions').textContent = 'SSE connection error. Falling back to snapshot.';
+          initialLoad().catch((err) => {
+            document.getElementById('captions').textContent = err.message;
+          });
+          sse.close();
+        }
+      };
+
+      initialLoad().catch(() => {});
     </script>
   </body>
 </html>`;
@@ -335,13 +365,27 @@ export const streamingUiService = {
     const adSessionId = window.ACCESSIBILITY_AD_SESSION_ID || '';
     feedbackLink.href = window.location.origin + '/feedback?streamId=' + encodeURIComponent(streamId) + '&source=overlay&adSessionId=' + encodeURIComponent(adSessionId);
 
-    try {
-      const payload = await fetch('/v1/streams/' + streamId + '/captions').then((r) => r.json());
-      const last = payload.captions[payload.captions.length - 1];
-      target.textContent = last ? last.text : 'No captions available yet.';
-    } catch (error) {
-      target.textContent = 'Overlay error: ' + error.message;
-    }
+    const sse = new EventSource('/v1/streams/' + streamId + '/events/stream');
+    sse.onmessage = function (e) {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.type === 'segment') {
+          target.textContent = data.segment.text;
+        } else if (data.type === 'stream.stopped') {
+          target.textContent = '[stream ended]';
+          sse.close();
+        }
+      } catch (_) {}
+    };
+    sse.onerror = function () {
+      fetch('/v1/streams/' + streamId + '/captions').then((r) => r.json()).then((payload) => {
+        const last = payload.captions[payload.captions.length - 1];
+        target.textContent = last ? last.text : 'No captions available yet.';
+      }).catch((error) => {
+        target.textContent = 'Overlay error: ' + error.message;
+      });
+      sse.close();
+    };
   }
 
   if (document.readyState === 'loading') {
