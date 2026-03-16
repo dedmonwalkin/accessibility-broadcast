@@ -12,6 +12,7 @@ import { streamingUiService } from './services/streamingUiService.js';
 import { streamEmitter } from './services/streamingService.js';
 import { persistenceService } from './services/persistence/persistenceService.js';
 import { runtimeConfig } from './config/runtime.js';
+import { generateRequestId, logRequest, getMetrics as getRequestMetrics, incrementConnections, decrementConnections, incrementSse, decrementSse, incrementSseEvents } from './utils/logger.js';
 
 const runtime = runtimeConfig();
 const PORT = runtime.port;
@@ -42,6 +43,8 @@ function sendHtml(res, status, html) {
 
 function isPublicPath(method, pathname) {
   if (pathname === '/health') return true;
+  if (pathname === '/healthz') return true;
+  if (pathname === '/readyz') return true;
   if (pathname === '/openapi.yaml') return true;
   if (pathname === '/feedback') return true;
   if (pathname.startsWith('/viewer/')) return true;
@@ -58,9 +61,34 @@ function authenticate(req) {
 }
 
 const rateLimitWindows = new Map();
+const MAX_RATE_LIMIT_ENTRIES = 10000;
+let lastRateLimitCleanup = Date.now();
+
+function cleanupRateLimitWindows() {
+  const now = Date.now();
+  if (now - lastRateLimitCleanup < 60_000) return;
+  lastRateLimitCleanup = now;
+  const windowMs = 60 * 1000;
+  for (const [ip, hits] of rateLimitWindows) {
+    const valid = hits.filter((t) => now - t < windowMs);
+    if (valid.length === 0) {
+      rateLimitWindows.delete(ip);
+    } else {
+      rateLimitWindows.set(ip, valid);
+    }
+  }
+  if (rateLimitWindows.size > MAX_RATE_LIMIT_ENTRIES) {
+    const toRemove = rateLimitWindows.size - MAX_RATE_LIMIT_ENTRIES;
+    const keys = rateLimitWindows.keys();
+    for (let i = 0; i < toRemove; i++) {
+      rateLimitWindows.delete(keys.next().value);
+    }
+  }
+}
 
 function checkRateLimit(req) {
   if (runtime.rateLimitRpm <= 0) return null;
+  cleanupRateLimitWindows();
   const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket.remoteAddress || 'unknown';
   const now = Date.now();
   const windowMs = 60 * 1000;
@@ -75,6 +103,11 @@ function checkRateLimit(req) {
 }
 
 async function route(req, res) {
+  const startTime = Date.now();
+  const requestId = generateRequestId();
+  res.setHeader('X-Request-Id', requestId);
+  incrementConnections();
+
   const url = parseUrl(req);
   const { pathname } = url;
   const method = req.method.toUpperCase();
@@ -82,6 +115,25 @@ async function route(req, res) {
   try {
     if (method === 'GET' && pathname === '/health') {
       return sendJson(res, 200, { ok: true, service: 'accessibility-broadcast' });
+    }
+
+    if (method === 'GET' && pathname === '/healthz') {
+      return sendJson(res, 200, { status: 'ok' });
+    }
+
+    if (method === 'GET' && pathname === '/readyz') {
+      const checks = { database: 'skipped' };
+      let healthy = true;
+      if (runtime.enablePostgres) {
+        try {
+          await persistenceService.ping();
+          checks.database = 'ok';
+        } catch {
+          checks.database = 'error';
+          healthy = false;
+        }
+      }
+      return sendJson(res, healthy ? 200 : 503, { status: healthy ? 'ok' : 'degraded', checks });
     }
 
     const retryAfter = checkRateLimit(req);
@@ -180,14 +232,25 @@ async function route(req, res) {
         'X-Accel-Buffering': 'no'
       });
       res.write(': connected\n\n');
+      incrementSse();
+
+      const idleTimeout = setTimeout(() => {
+        res.end();
+      }, runtime.sseIdleTimeoutMs);
 
       function onEvent(data) {
+        incrementSseEvents();
+        idleTimeout.refresh();
         res.write(`data: ${JSON.stringify(data)}\n\n`);
       }
 
       const eventKey = `stream:${streamSse.id}`;
       streamEmitter.on(eventKey, onEvent);
-      req.on('close', () => streamEmitter.off(eventKey, onEvent));
+      req.on('close', () => {
+        clearTimeout(idleTimeout);
+        decrementSse();
+        streamEmitter.off(eventKey, onEvent);
+      });
       return;
     }
 
@@ -316,6 +379,7 @@ async function route(req, res) {
 
     if (method === 'GET' && pathname === '/v1/admin/metrics') {
       const outputs = [...store.streamOutputs.values()];
+      const requestMetrics = getRequestMetrics();
       return sendJson(res, 200, {
         streams: {
           total: store.streams.size,
@@ -339,7 +403,8 @@ async function route(req, res) {
         viewer_profiles: {
           total: store.viewerProfiles.size
         },
-        audit_log_entries: store.auditLog.length
+        audit_log_entries: store.auditLog.length,
+        ...requestMetrics
       });
     }
 
@@ -359,6 +424,9 @@ async function route(req, res) {
     return notFound(res);
   } catch (error) {
     return sendJson(res, 400, { error: error.message });
+  } finally {
+    decrementConnections();
+    logRequest({ method, path: pathname, statusCode: res.statusCode, durationMs: Date.now() - startTime, requestId });
   }
 }
 
@@ -375,6 +443,8 @@ export async function startServer(port = PORT) {
   });
 }
 
+const cleanupTimers = [];
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   startServer(PORT).then(() => {
     // eslint-disable-next-line no-console
@@ -382,13 +452,18 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 
     const intervalMs = runtime.snapshotIntervalMs;
     if (intervalMs > 0) {
-      setInterval(() => {
+      cleanupTimers.push(setInterval(() => {
         persistenceService.snapshot('interval').catch(() => {});
-      }, intervalMs);
+      }, intervalMs));
     }
+
+    const rlCleanup = setInterval(() => cleanupRateLimitWindows(), 5 * 60_000);
+    if (typeof rlCleanup.unref === 'function') rlCleanup.unref();
+    cleanupTimers.push(rlCleanup);
   });
 
   async function shutdown() {
+    for (const timer of cleanupTimers) clearInterval(timer);
     await persistenceService.snapshot('shutdown').catch(() => {});
     await persistenceService.close();
     process.exit(0);

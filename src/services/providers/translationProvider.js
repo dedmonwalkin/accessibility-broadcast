@@ -1,9 +1,38 @@
+import { runtimeConfig } from '../../config/runtime.js';
+
 const DEFAULT_TIMEOUT_MS = Number(process.env.TRANSLATION_HTTP_TIMEOUT_MS || 5000);
 
 function withTimeout(timeoutMs) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   return { signal: controller.signal, clear: () => clearTimeout(timer) };
+}
+
+function createBoundedCache() {
+  const rt = runtimeConfig();
+  const ttlMs = rt.translationCacheTtlMs;
+  const maxSize = rt.translationCacheMaxSize;
+  const entries = new Map();
+
+  return {
+    get(key) {
+      const entry = entries.get(key);
+      if (!entry) return undefined;
+      if (Date.now() - entry.ts > ttlMs) {
+        entries.delete(key);
+        return undefined;
+      }
+      return entry.value;
+    },
+    set(key, value) {
+      if (entries.size >= maxSize) {
+        const oldest = entries.keys().next().value;
+        entries.delete(oldest);
+      }
+      entries.set(key, { value, ts: Date.now() });
+    },
+    get size() { return entries.size; }
+  };
 }
 
 const mockTranslationProvider = {
@@ -15,7 +44,7 @@ const mockTranslationProvider = {
 };
 
 function createLibreTranslateProvider({ baseUrl, apiKey }) {
-  const cache = new Map();
+  const cache = createBoundedCache();
   const url = `${baseUrl.replace(/\/$/, '')}/translate`;
 
   return {
@@ -26,7 +55,8 @@ function createLibreTranslateProvider({ baseUrl, apiKey }) {
       if (target === 'en') return text;
 
       const cacheKey = `${target}:${text}`;
-      if (cache.has(cacheKey)) return cache.get(cacheKey);
+      const cached = cache.get(cacheKey);
+      if (cached !== undefined) return cached;
 
       const t = withTimeout(DEFAULT_TIMEOUT_MS);
       try {
@@ -53,7 +83,7 @@ function createLibreTranslateProvider({ baseUrl, apiKey }) {
 }
 
 function createDeeplProvider({ apiKey, baseUrl }) {
-  const cache = new Map();
+  const cache = createBoundedCache();
   const apiUrl = `${(baseUrl || 'https://api-free.deepl.com').replace(/\/$/, '')}/v2/translate`;
 
   return {
@@ -63,7 +93,8 @@ function createDeeplProvider({ apiKey, baseUrl }) {
       if (target === 'EN' || target === 'EN_US') return text;
 
       const cacheKey = `${target}:${text}`;
-      if (cache.has(cacheKey)) return cache.get(cacheKey);
+      const cached = cache.get(cacheKey);
+      if (cached !== undefined) return cached;
 
       const t = withTimeout(DEFAULT_TIMEOUT_MS);
       try {

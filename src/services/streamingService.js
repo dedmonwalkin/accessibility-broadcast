@@ -3,11 +3,12 @@ import { store } from '../data/store.js';
 import { assertRequired } from '../utils/validation.js';
 import { createModelProvider } from './providers/modelProvider.js';
 import { createTranslationProvider } from './providers/translationProvider.js';
+import { runtimeConfig } from '../config/runtime.js';
 
 const translationProvider = createTranslationProvider();
 
 export const streamEmitter = new EventEmitter();
-streamEmitter.setMaxListeners(200);
+streamEmitter.setMaxListeners(runtimeConfig().maxSseListeners);
 import {
   SUPPORTED_ACCESSIBILITY_PROFILES,
   SUPPORTED_AUDIO_DESCRIPTION_STYLES,
@@ -22,7 +23,6 @@ import { viewerPreferencesService } from './viewerPreferencesService.js';
 
 const SUPPORTED_PROTOCOLS = new Set(['rtmp', 'srt']);
 const DEFAULT_SIGNER = 'avatar-hope';
-const LOW_CONFIDENCE_THRESHOLD = 0.72;
 
 function toSeconds(iso) {
   return Math.floor(new Date(iso).getTime() / 1000);
@@ -387,7 +387,7 @@ export const streamingService = {
     outputs.signCards = buildSignCards(outputs.signScript);
 
     outputs.events.forEach((event) => {
-      if (event.confidence >= LOW_CONFIDENCE_THRESHOLD) return;
+      if (event.confidence >= runtimeConfig().lowConfidenceThreshold) return;
       const incidentId = store.nextId('incident');
       store.incidents.set(incidentId, {
         id: incidentId,
@@ -479,7 +479,7 @@ export const streamingService = {
       outputs.captionTranslations[lang].push(...(newTranslations[lang] || []));
     }
 
-    if (accessibility.confidence < LOW_CONFIDENCE_THRESHOLD) {
+    if (accessibility.confidence < runtimeConfig().lowConfidenceThreshold) {
       const incidentId = store.nextId('incident');
       store.incidents.set(incidentId, {
         id: incidentId,

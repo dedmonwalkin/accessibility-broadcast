@@ -10,6 +10,12 @@ export function runtimeConfig() {
     rateLimitRpm: Number(env.RATE_LIMIT_RPM || 60),
     translationProvider: env.TRANSLATION_PROVIDER || 'mock',
     translationHttpBaseUrl: env.TRANSLATION_HTTP_BASE_URL || '',
-    translationApiKey: env.TRANSLATION_API_KEY || ''
+    translationApiKey: env.TRANSLATION_API_KEY || '',
+    translationCacheTtlMs: Number(env.TRANSLATION_CACHE_TTL_MS || 3600_000),
+    translationCacheMaxSize: Number(env.TRANSLATION_CACHE_MAX_SIZE || 10000),
+    modelHttpTimeoutMs: Number(env.MODEL_HTTP_TIMEOUT_MS || 4000),
+    lowConfidenceThreshold: Number(env.LOW_CONFIDENCE_THRESHOLD || 0.72),
+    maxSseListeners: Number(env.MAX_SSE_LISTENERS || 200),
+    sseIdleTimeoutMs: Number(env.SSE_IDLE_TIMEOUT_MS || 300000)
   };
 }
