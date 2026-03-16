@@ -434,6 +434,91 @@ export const streamingService = {
     return stream;
   },
 
+  async ingestChunk(id, input = {}) {
+    const stream = assertStream(id);
+    if (stream.status !== 'running') throw new Error('Stream is not running');
+
+    const providerConfig = { provider: stream.model_provider };
+    const provider = createModelProvider(providerConfig);
+
+    const transcription = await provider.transcribe({
+      audio_base64: input.audio_base64 || null,
+      format: input.format || 'wav',
+      language: input.language || stream.language || 'en',
+      duration_ms: input.duration_ms || 2000
+    });
+
+    const anchorMs = Date.now() - (input.duration_ms || 2000);
+    const outputs = store.streamOutputs.get(id);
+    const timelineItem = asTimelineItem(
+      {
+        transcript: transcription.transcript,
+        scene: input.scene || transcription.scene || '',
+        speaker: input.speaker || 'unknown',
+        entities: input.entities || []
+      },
+      0,
+      anchorMs
+    );
+
+    const perception = await provider.inferPerception({ timelineItem, stream });
+    const accessibility = await provider.inferAccessibility({ timelineItem, perception, stream });
+    const sign = await provider.inferSignScript({ accessibility, timelineItem, stream });
+
+    outputs.events.push(accessibility);
+    const captionSegment = toCaptionSegment(accessibility);
+    const audioSegment = toAudioDescriptionSegment(accessibility);
+    outputs.captions.push(captionSegment);
+    outputs.audioDescription.push(audioSegment);
+    outputs.signScript.push(sign);
+    outputs.signCards = buildSignCards(outputs.signScript);
+
+    const newTranslations = await buildCaptionTranslations([captionSegment], stream.output_languages);
+    for (const lang of stream.output_languages) {
+      if (!outputs.captionTranslations[lang]) outputs.captionTranslations[lang] = [];
+      outputs.captionTranslations[lang].push(...(newTranslations[lang] || []));
+    }
+
+    if (accessibility.confidence < LOW_CONFIDENCE_THRESHOLD) {
+      const incidentId = store.nextId('incident');
+      store.incidents.set(incidentId, {
+        id: incidentId,
+        stream_id: id,
+        segment_id: accessibility.segment_id,
+        reason: 'low_confidence',
+        severity: accessibility.confidence < 0.6 ? 'high' : 'medium',
+        status: 'open',
+        confidence: accessibility.confidence,
+        assigned_to: null,
+        resolution: null,
+        createdAt: store.nowIso(),
+        updatedAt: store.nowIso()
+      });
+    }
+
+    streamEmitter.emit(`stream:${id}`, {
+      type: 'segment',
+      stream_id: id,
+      segment: captionSegment,
+      audio_description: audioSegment,
+      sign
+    });
+
+    store.log('stream.chunk.ingested', {
+      streamId: id,
+      segmentId: accessibility.segment_id,
+      confidence: accessibility.confidence
+    });
+
+    return {
+      segment_id: accessibility.segment_id,
+      segment: captionSegment,
+      audio_description: audioSegment,
+      sign,
+      transcript_confidence: transcription.confidence
+    };
+  },
+
   getEvents(id) {
     assertStream(id);
     return store.streamOutputs.get(id)?.events || [];

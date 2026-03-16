@@ -98,6 +98,19 @@ export function createHttpModelProvider(config = {}) {
       } catch {
         return mockModelProvider.inferSignScript(input);
       }
+    },
+
+    async transcribe(input) {
+      try {
+        return await postJson({
+          endpoint: endpoint(baseUrl, '/v1/models/transcribe'),
+          payload: input,
+          timeoutMs,
+          headers
+        });
+      } catch {
+        return mockModelProvider.transcribe(input);
+      }
     }
   };
 }

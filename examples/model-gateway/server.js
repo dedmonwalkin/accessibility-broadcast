@@ -108,6 +108,30 @@ export function createModelGatewayServer() {
         return sendJson(res, 200, signScript(body));
       }
 
+      if (req.url === '/v1/models/transcribe') {
+        const language = body.language || 'en';
+        const durationMs = Number(body.duration_ms || 2000);
+        const phrases = [
+          'The home team advances quickly through the midfield.',
+          'A strong tackle forces a turnover near the penalty area.',
+          'The goalkeeper makes a spectacular diving save.',
+          'Corner kick awarded to the visiting side.',
+          'Goal! The crowd erupts as the ball hits the back of the net.',
+          'Substitution being made — number seven coming off.',
+          'Free kick from thirty metres out — this could be dangerous.',
+          'The final whistle has blown — full time.'
+        ];
+        const transcript = phrases[Math.floor(Math.random() * phrases.length)];
+        const transcriptScore = Math.min(transcript.length / 120, 1);
+        return sendJson(res, 200, {
+          transcript,
+          scene: 'Gateway stub: visual scene unavailable',
+          language,
+          duration_ms: durationMs,
+          confidence: Number((0.78 + transcriptScore * 0.18).toFixed(2))
+        });
+      }
+
       if (req.url === '/v1/translate') {
         const text = body.q || body.text || '';
         const target = body.target || 'en';

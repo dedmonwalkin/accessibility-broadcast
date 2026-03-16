@@ -141,6 +141,12 @@ async function route(req, res) {
       return sendJson(res, 200, result);
     }
 
+    const streamIngestChunk = extractParams(pathname, '/v1/streams/:id/ingest/chunk');
+    if (method === 'POST' && streamIngestChunk) {
+      const body = await parseJsonBody(req);
+      return sendJson(res, 201, await streamingService.ingestChunk(streamIngestChunk.id, body));
+    }
+
     const streamCaptions = extractParams(pathname, '/v1/streams/:id/captions');
     if (method === 'GET' && streamCaptions) {
       const format = url.searchParams.get('format') || 'vtt';

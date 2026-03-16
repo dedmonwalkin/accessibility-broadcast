@@ -1,5 +1,18 @@
 import { normalizeConfidence } from '../../utils/validation.js';
 
+const MOCK_TRANSCRIPTS = [
+  { transcript: 'The home team advances quickly through the midfield.', scene: 'Wide tracking shot following the ball' },
+  { transcript: 'A strong tackle forces a turnover near the penalty area.', scene: 'Close-up of players contesting possession' },
+  { transcript: 'The goalkeeper makes a spectacular diving save.', scene: 'Goalkeeper diving to the right corner' },
+  { transcript: 'Corner kick awarded to the visiting side.', scene: 'Referee signals corner flag' },
+  { transcript: 'Goal! The crowd erupts as the ball hits the back of the net.', scene: 'Ball crosses goal line as fans leap to their feet' },
+  { transcript: 'Substitution being made — number seven coming off.', scene: 'Player jogging toward the sideline' },
+  { transcript: 'Free kick from thirty metres out — this could be dangerous.', scene: 'Players forming a wall' },
+  { transcript: 'The final whistle has blown — full time.', scene: 'Referee raises whistle to mouth' }
+];
+
+let mockTranscriptIndex = 0;
+
 function confidenceFromText(timelineItem) {
   const transcriptScore = Math.min(String(timelineItem.transcript || '').length / 120, 1);
   const sceneScore = Math.min(String(timelineItem.scene || '').length / 100, 1);
@@ -47,6 +60,19 @@ export const mockModelProvider = {
       confidence: perception.confidence,
       source_refs: perception.source_refs,
       audio_description: perception.scene
+    };
+  },
+
+  async transcribe({ language = 'en', duration_ms = 2000 } = {}) {
+    const entry = MOCK_TRANSCRIPTS[mockTranscriptIndex % MOCK_TRANSCRIPTS.length];
+    mockTranscriptIndex += 1;
+    const transcriptScore = Math.min(entry.transcript.length / 120, 1);
+    return {
+      transcript: entry.transcript,
+      scene: entry.scene,
+      language,
+      duration_ms,
+      confidence: normalizeConfidence(0.78 + transcriptScore * 0.18)
     };
   },
 
