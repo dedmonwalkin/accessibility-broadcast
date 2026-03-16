@@ -308,6 +308,35 @@ async function route(req, res) {
       return sendJson(res, 200, await persistenceService.snapshot(body.reason || 'manual_api'));
     }
 
+    if (method === 'GET' && pathname === '/v1/admin/metrics') {
+      const outputs = [...store.streamOutputs.values()];
+      return sendJson(res, 200, {
+        streams: {
+          total: store.streams.size,
+          running: [...store.streams.values()].filter((s) => s.status === 'running').length,
+          stopped: [...store.streams.values()].filter((s) => s.status === 'stopped').length
+        },
+        segments: {
+          total: outputs.reduce((sum, o) => sum + (o.events?.length || 0), 0)
+        },
+        incidents: {
+          total: store.incidents.size,
+          open: [...store.incidents.values()].filter((i) => i.status === 'open').length,
+          resolved: [...store.incidents.values()].filter((i) => i.status === 'resolved').length
+        },
+        feedback: {
+          total: store.feedback.size
+        },
+        ad_sessions: {
+          total: store.adSessions.size
+        },
+        viewer_profiles: {
+          total: store.viewerProfiles.size
+        },
+        audit_log_entries: store.auditLog.length
+      });
+    }
+
     if (method === 'GET' && pathname === '/v1/debug/state' && runtime.nodeEnv !== 'production') {
       return sendJson(res, 200, {
         streams: [...store.streams.values()],

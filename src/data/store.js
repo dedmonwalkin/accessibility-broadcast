@@ -28,6 +28,8 @@ export class InMemoryStore {
       createdAt: this.nowIso()
     };
     this.auditLog.push(record);
+    // eslint-disable-next-line no-console
+    console.log(JSON.stringify({ ts: record.createdAt, action, ...payload }));
     return record;
   }
 }
