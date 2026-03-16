@@ -57,6 +57,23 @@ function authenticate(req) {
   return runtime.apiKeys.includes(token);
 }
 
+const rateLimitWindows = new Map();
+
+function checkRateLimit(req) {
+  if (runtime.rateLimitRpm <= 0) return null;
+  const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket.remoteAddress || 'unknown';
+  const now = Date.now();
+  const windowMs = 60 * 1000;
+  const hits = (rateLimitWindows.get(ip) || []).filter((t) => now - t < windowMs);
+  hits.push(now);
+  rateLimitWindows.set(ip, hits);
+  if (hits.length > runtime.rateLimitRpm) {
+    const retryAfter = Math.ceil((hits[0] + windowMs - now) / 1000);
+    return retryAfter;
+  }
+  return null;
+}
+
 async function route(req, res) {
   const url = parseUrl(req);
   const { pathname } = url;
@@ -65,6 +82,12 @@ async function route(req, res) {
   try {
     if (method === 'GET' && pathname === '/health') {
       return sendJson(res, 200, { ok: true, service: 'accessibility-broadcast' });
+    }
+
+    const retryAfter = checkRateLimit(req);
+    if (retryAfter !== null) {
+      res.setHeader('Retry-After', retryAfter);
+      return sendJson(res, 429, { error: 'Too Many Requests', retry_after_seconds: retryAfter });
     }
 
     if (!isPublicPath(method, pathname) && !authenticate(req)) {
