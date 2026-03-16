@@ -2,6 +2,9 @@ import { EventEmitter } from 'node:events';
 import { store } from '../data/store.js';
 import { assertRequired } from '../utils/validation.js';
 import { createModelProvider } from './providers/modelProvider.js';
+import { createTranslationProvider } from './providers/translationProvider.js';
+
+const translationProvider = createTranslationProvider();
 
 export const streamEmitter = new EventEmitter();
 streamEmitter.setMaxListeners(200);
@@ -124,19 +127,18 @@ function normalizeProfiles(input = []) {
   return normalized.length ? [...new Set(normalized)] : ['deaf_or_hard_of_hearing', 'blind_or_low_vision'];
 }
 
-function pseudoTranslate(text, language) {
-  if (language === 'en-US') return text;
-  return `[${language}] ${text}`;
-}
-
-function buildCaptionTranslations(captions, outputLanguages) {
+async function buildCaptionTranslations(captions, outputLanguages) {
   const map = {};
-  outputLanguages.forEach((language) => {
-    map[language] = captions.map((segment) => ({
-      ...segment,
-      text: pseudoTranslate(segment.text, language)
-    }));
-  });
+  await Promise.all(
+    outputLanguages.map(async (language) => {
+      map[language] = await Promise.all(
+        captions.map(async (segment) => ({
+          ...segment,
+          text: await translationProvider.translate(segment.text, language)
+        }))
+      );
+    })
+  );
   return map;
 }
 
@@ -379,7 +381,7 @@ export const streamingService = {
     stream.accessibility_profiles = normalizeProfiles(input.accessibility_profiles || stream.accessibility_profiles);
     outputs.events = generated.events;
     outputs.captions = generated.captions;
-    outputs.captionTranslations = buildCaptionTranslations(outputs.captions, stream.output_languages);
+    outputs.captionTranslations = await buildCaptionTranslations(outputs.captions, stream.output_languages);
     outputs.audioDescription = generated.audioDescription;
     outputs.signScript = generated.signScript;
     outputs.signCards = buildSignCards(outputs.signScript);
@@ -580,7 +582,7 @@ export const streamingService = {
     });
   },
 
-  resolveIncident(id, input = {}) {
+  async resolveIncident(id, input = {}) {
     const incident = store.incidents.get(id);
     if (!incident) throw new Error('Incident not found');
     if (incident.status !== 'open') throw new Error('Incident already resolved');
@@ -617,7 +619,7 @@ export const streamingService = {
           signSegment.fallback_text = input.corrected_text;
         }
 
-        outputs.captionTranslations = buildCaptionTranslations(
+        outputs.captionTranslations = await buildCaptionTranslations(
           outputs.captions,
           stream?.output_languages || ['en-US']
         );

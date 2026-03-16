@@ -216,7 +216,7 @@ async function route(req, res) {
     const incidentResolve = extractParams(pathname, '/v1/incidents/:id/resolve');
     if (method === 'POST' && incidentResolve) {
       const body = await parseJsonBody(req);
-      const result = streamingService.resolveIncident(incidentResolve.id, body);
+      const result = await streamingService.resolveIncident(incidentResolve.id, body);
       persistenceService.snapshot('incident.resolved').catch(() => {});
       return sendJson(res, 200, result);
     }

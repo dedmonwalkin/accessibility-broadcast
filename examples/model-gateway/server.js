@@ -108,6 +108,13 @@ export function createModelGatewayServer() {
         return sendJson(res, 200, signScript(body));
       }
 
+      if (req.url === '/v1/translate') {
+        const text = body.q || body.text || '';
+        const target = body.target || 'en';
+        const translated = (target === 'en') ? text : `[${target}] ${text}`;
+        return sendJson(res, 200, { translatedText: translated });
+      }
+
       return sendJson(res, 404, { error: 'Not found' });
     } catch (error) {
       return sendJson(res, 400, { error: error.message });

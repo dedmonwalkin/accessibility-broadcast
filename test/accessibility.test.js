@@ -66,7 +66,7 @@ test('creates and resolves low-confidence incidents with correction', async () =
   const open = streamingService.listIncidents({ status: 'open' });
   assert.equal(open.length, 1);
 
-  const resolved = streamingService.resolveIncident(open[0].id, {
+  const resolved = await streamingService.resolveIncident(open[0].id, {
     assigned_to: 'human-reviewer-1',
     resolution: 'caption corrected after review',
     corrected_text: 'Goal scored by the home team after a fast sprint.'
