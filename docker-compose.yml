@@ -1,0 +1,50 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3000
+      API_KEYS: ${API_KEYS:-}
+      ENABLE_POSTGRES: "true"
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/accessibility_broadcast
+      SNAPSHOT_INTERVAL_MS: ${SNAPSHOT_INTERVAL_MS:-300000}
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-http}
+      MODEL_HTTP_BASE_URL: http://model-gateway:4011
+    depends_on:
+      db:
+        condition: service_healthy
+      model-gateway:
+        condition: service_started
+    restart: unless-stopped
+
+  model-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.model-gateway
+    ports:
+      - "4011:4011"
+    environment:
+      MODEL_GATEWAY_PORT: 4011
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: accessibility_broadcast
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  pgdata:
