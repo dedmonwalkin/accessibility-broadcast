@@ -9,8 +9,11 @@ import { feedbackService } from './services/feedbackService.js';
 import { adIntegrationService } from './services/adIntegrationService.js';
 import { accessibilityService } from './services/accessibilityService.js';
 import { streamingUiService } from './services/streamingUiService.js';
+import { persistenceService } from './services/persistence/persistenceService.js';
+import { runtimeConfig } from './config/runtime.js';
 
-const PORT = Number(process.env.PORT || 3000);
+const runtime = runtimeConfig();
+const PORT = runtime.port;
 const OPENAPI_PATH = path.resolve(process.cwd(), 'openapi/openapi.yaml');
 
 function extractParams(pathname, pattern) {
@@ -81,12 +84,16 @@ async function route(req, res) {
     const streamStart = extractParams(pathname, '/v1/streams/:id/start');
     if (method === 'POST' && streamStart) {
       const body = await parseJsonBody(req);
-      return sendJson(res, 200, await streamingService.startStream(streamStart.id, body));
+      const result = await streamingService.startStream(streamStart.id, body);
+      persistenceService.snapshot('stream.started').catch(() => {});
+      return sendJson(res, 200, result);
     }
 
     const streamStop = extractParams(pathname, '/v1/streams/:id/stop');
     if (method === 'POST' && streamStop) {
-      return sendJson(res, 200, streamingService.stopStream(streamStop.id));
+      const result = streamingService.stopStream(streamStop.id);
+      persistenceService.snapshot('stream.stopped').catch(() => {});
+      return sendJson(res, 200, result);
     }
 
     const streamCaptions = extractParams(pathname, '/v1/streams/:id/captions');
@@ -144,7 +151,9 @@ async function route(req, res) {
     const incidentResolve = extractParams(pathname, '/v1/incidents/:id/resolve');
     if (method === 'POST' && incidentResolve) {
       const body = await parseJsonBody(req);
-      return sendJson(res, 200, streamingService.resolveIncident(incidentResolve.id, body));
+      const result = streamingService.resolveIncident(incidentResolve.id, body);
+      persistenceService.snapshot('incident.resolved').catch(() => {});
+      return sendJson(res, 200, result);
     }
 
     if (method === 'POST' && pathname === '/v1/feedback') {
@@ -229,6 +238,11 @@ async function route(req, res) {
       return;
     }
 
+    if (method === 'POST' && pathname === '/v1/admin/snapshot') {
+      const body = await parseJsonBody(req);
+      return sendJson(res, 200, await persistenceService.snapshot(body.reason || 'manual_api'));
+    }
+
     if (method === 'GET' && pathname === '/v1/debug/state') {
       return sendJson(res, 200, {
         streams: [...store.streams.values()],
@@ -250,7 +264,10 @@ async function route(req, res) {
 
 const server = http.createServer(route);
 
-export function startServer(port = PORT) {
+export async function startServer(port = PORT) {
+  await persistenceService.configure(runtime);
+  await persistenceService.loadLatest();
+
   return new Promise((resolve) => {
     server.listen(port, () => {
       resolve(server);
@@ -262,5 +279,21 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   startServer(PORT).then(() => {
     // eslint-disable-next-line no-console
     console.log(`Accessibility Broadcast API running on http://localhost:${PORT}`);
+
+    const intervalMs = runtime.snapshotIntervalMs;
+    if (intervalMs > 0) {
+      setInterval(() => {
+        persistenceService.snapshot('interval').catch(() => {});
+      }, intervalMs);
+    }
   });
+
+  async function shutdown() {
+    await persistenceService.snapshot('shutdown').catch(() => {});
+    await persistenceService.close();
+    process.exit(0);
+  }
+
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 }
