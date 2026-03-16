@@ -39,6 +39,22 @@ function sendHtml(res, status, html) {
   res.end(html);
 }
 
+function isPublicPath(method, pathname) {
+  if (pathname === '/health') return true;
+  if (pathname === '/openapi.yaml') return true;
+  if (pathname === '/feedback') return true;
+  if (pathname.startsWith('/viewer/')) return true;
+  if (pathname === '/v1/embed/overlay.js') return true;
+  return false;
+}
+
+function authenticate(req) {
+  if (runtime.apiKeys.length === 0) return true;
+  const auth = req.headers['authorization'] || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+  return runtime.apiKeys.includes(token);
+}
+
 async function route(req, res) {
   const url = parseUrl(req);
   const { pathname } = url;
@@ -47,6 +63,10 @@ async function route(req, res) {
   try {
     if (method === 'GET' && pathname === '/health') {
       return sendJson(res, 200, { ok: true, service: 'accessibility-broadcast' });
+    }
+
+    if (!isPublicPath(method, pathname) && !authenticate(req)) {
+      return sendJson(res, 401, { error: 'Unauthorized' });
     }
 
     if (method === 'GET' && pathname === '/v1/accessibility/resources') {
@@ -243,7 +263,7 @@ async function route(req, res) {
       return sendJson(res, 200, await persistenceService.snapshot(body.reason || 'manual_api'));
     }
 
-    if (method === 'GET' && pathname === '/v1/debug/state') {
+    if (method === 'GET' && pathname === '/v1/debug/state' && runtime.nodeEnv !== 'production') {
       return sendJson(res, 200, {
         streams: [...store.streams.values()],
         streamOutputs: [...store.streamOutputs.entries()],
