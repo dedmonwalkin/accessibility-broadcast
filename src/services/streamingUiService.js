@@ -84,6 +84,101 @@ export const streamingUiService = {
         border: 1px solid #2f5379;
         background: #fff;
       }
+      .sign-overlay {
+        --sign-bg: #1a1a2e;
+        --sign-bg-opacity: 0.85;
+        --sign-primary: #5bd7ff;
+        --sign-secondary: #ffffff;
+        --sign-accent: #74ffa8;
+        --sign-text: #f7fbff;
+        --sign-token-bg: #12243f;
+        --sign-font: "IBM Plex Mono", monospace;
+        --sign-font-weight: 400;
+        --sign-font-size: 1rem;
+        background: var(--sign-bg);
+        opacity: var(--sign-bg-opacity);
+        border-radius: 14px;
+        padding: 16px;
+        margin-bottom: 16px;
+        color: var(--sign-text);
+        font-family: var(--sign-font);
+        font-weight: var(--sign-font-weight);
+        font-size: var(--sign-font-size);
+        min-height: 80px;
+      }
+      .sign-overlay.bg-gradient {
+        background: linear-gradient(135deg, var(--sign-bg), color-mix(in oklab, var(--sign-bg) 60%, black));
+      }
+      .sign-overlay.bg-textured {
+        background: var(--sign-bg);
+        background-image: repeating-linear-gradient(
+          45deg, transparent, transparent 8px,
+          rgba(0,0,0,0.03) 8px, rgba(0,0,0,0.03) 16px
+        );
+      }
+      .sign-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 12px;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .theme-select {
+        background: rgba(0,0,0,0.3);
+        color: inherit;
+        border: 1px solid rgba(255,255,255,0.2);
+        border-radius: 8px;
+        padding: 4px 8px;
+        font: inherit;
+        font-size: 0.85rem;
+        cursor: pointer;
+      }
+      .sign-segments {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .sign-segments.layout-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 10px;
+      }
+      .sign-segments.layout-inline {
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .sign-segment {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: baseline;
+      }
+      .sign-segment .ts {
+        font-size: 0.75em;
+        opacity: 0.5;
+        min-width: 60px;
+      }
+      .sign-token {
+        display: inline-block;
+        background: var(--sign-token-bg);
+        color: var(--sign-primary);
+        padding: 3px 8px;
+        border-radius: 6px;
+        font-weight: var(--sign-font-weight);
+        letter-spacing: 0.04em;
+      }
+      .sign-facial-cue {
+        font-size: 0.7em;
+        color: var(--sign-accent);
+        opacity: 0.8;
+        margin-left: 4px;
+      }
+      .sign-empty {
+        opacity: 0.5;
+        font-style: italic;
+      }
     </style>
   </head>
   <body>
@@ -103,9 +198,14 @@ export const streamingUiService = {
         <span class="pill">Live Captions</span>
         <pre id="captions">Loading...</pre>
       </div>
-      <div class="panel">
-        <span class="pill">ASL Sign Script</span>
-        <pre id="signScript">Loading...</pre>
+      <div class="sign-overlay" id="signOverlay">
+        <div class="sign-header">
+          <span class="pill">Sign Language</span>
+          <select class="theme-select" id="themeSelect" aria-label="Sign overlay theme"></select>
+        </div>
+        <div class="sign-segments" id="signSegments">
+          <span class="sign-empty">Waiting for sign-script segments...</span>
+        </div>
       </div>
       <div class="panel">
         <span class="pill">Audio Description</span>
@@ -125,39 +225,125 @@ export const streamingUiService = {
 
       const captionLines = [];
       const audioLines = [];
-      const signLines = [];
+      let allThemes = [];
+      const sizeMap = { small: '280px', medium: '360px', large: '480px' };
 
-      function renderPanels() {
-        document.getElementById('captions').textContent = captionLines.join('\n') || 'Waiting for captions...';
-        document.getElementById('signScript').textContent = signLines.join('\n') || 'Waiting for sign-script segments...';
-        document.getElementById('audio').textContent = audioLines.join('\n') || 'Waiting for audio-description segments...';
+      function applyTheme(theme) {
+        const overlay = document.getElementById('signOverlay');
+        const segments = document.getElementById('signSegments');
+        overlay.style.setProperty('--sign-bg', theme.background.color);
+        overlay.style.setProperty('--sign-bg-opacity', theme.background.opacity);
+        overlay.style.setProperty('--sign-primary', theme.palette.primary);
+        overlay.style.setProperty('--sign-secondary', theme.palette.secondary);
+        overlay.style.setProperty('--sign-accent', theme.palette.accent);
+        overlay.style.setProperty('--sign-text', theme.palette.text);
+        overlay.style.setProperty('--sign-token-bg', theme.palette.token_bg);
+        overlay.style.setProperty('--sign-font', theme.font.family);
+        overlay.style.setProperty('--sign-font-weight', theme.font.weight);
+        overlay.style.setProperty('--sign-font-size', (theme.font.size_scale * 1) + 'rem');
+        overlay.style.maxWidth = sizeMap[theme.size] || sizeMap.small;
+        overlay.className = 'sign-overlay' + (theme.background.style === 'gradient' ? ' bg-gradient' : theme.background.style === 'textured' ? ' bg-textured' : '');
+        segments.className = 'sign-segments' + (theme.layout === 'grid' ? ' layout-grid' : theme.layout === 'inline' ? ' layout-inline' : '');
+      }
+
+      function renderSignSegment(segment) {
+        const el = document.createElement('div');
+        el.className = 'sign-segment';
+        const ts = document.createElement('span');
+        ts.className = 'ts';
+        ts.textContent = segment.start || '';
+        el.appendChild(ts);
+        const tokens = segment.gloss_tokens || [];
+        tokens.forEach(function (token) {
+          const t = document.createElement('span');
+          t.className = 'sign-token';
+          t.textContent = token;
+          el.appendChild(t);
+        });
+        if (segment.facial_cues && segment.facial_cues.length) {
+          const cue = document.createElement('span');
+          cue.className = 'sign-facial-cue';
+          cue.textContent = segment.facial_cues.join(' ');
+          el.appendChild(cue);
+        }
+        return el;
+      }
+
+      function clearSignEmpty() {
+        const empty = document.querySelector('.sign-empty');
+        if (empty) empty.remove();
+      }
+
+      function renderCaptionsAndAudio() {
+        document.getElementById('captions').textContent = captionLines.join('\\n') || 'Waiting for captions...';
+        document.getElementById('audio').textContent = audioLines.join('\\n') || 'Waiting for audio-description segments...';
+      }
+
+      async function loadThemes() {
+        try {
+          const res = await fetch('/v1/sign-overlay-themes');
+          const data = await res.json();
+          allThemes = data.themes || [];
+          const select = document.getElementById('themeSelect');
+          allThemes.forEach(function (theme) {
+            const opt = document.createElement('option');
+            opt.value = theme.id;
+            opt.textContent = theme.name;
+            if (theme.accessibility_notes) opt.title = theme.accessibility_notes;
+            select.appendChild(opt);
+          });
+        } catch (_) {}
       }
 
       async function initialLoad() {
         const [captions, signOverlay, audio] = await Promise.all([
-          fetch('/v1/streams/' + streamId + '/captions' + viewerQuery).then((r) => r.json()),
-          fetch('/v1/streams/' + streamId + '/sign-overlay' + viewerQuery).then((r) => r.json()),
-          fetch('/v1/streams/' + streamId + '/audio-description' + viewerQuery).then((r) => r.json())
+          fetch('/v1/streams/' + streamId + '/captions' + viewerQuery).then(function (r) { return r.json(); }),
+          fetch('/v1/streams/' + streamId + '/sign-overlay' + viewerQuery).then(function (r) { return r.json(); }),
+          fetch('/v1/streams/' + streamId + '/audio-description' + viewerQuery).then(function (r) { return r.json(); })
         ]);
-        captions.captions.forEach((s) => captionLines.push('[' + s.start + '] ' + s.text));
-        signOverlay.segments.forEach((s) => signLines.push('[' + s.start + '] ' + s.gloss_tokens.join(' ')));
-        audio.segments.forEach((s) => audioLines.push('[' + s.start + '] ' + s.text));
-        renderPanels();
+        captions.captions.forEach(function (s) { captionLines.push('[' + s.start + '] ' + s.text); });
+        audio.segments.forEach(function (s) { audioLines.push('[' + s.start + '] ' + s.text); });
+        renderCaptionsAndAudio();
+
+        if (signOverlay.theme) {
+          applyTheme(signOverlay.theme);
+          document.getElementById('themeSelect').value = signOverlay.theme.id;
+        }
+        if (signOverlay.segments && signOverlay.segments.length) {
+          clearSignEmpty();
+          var container = document.getElementById('signSegments');
+          signOverlay.segments.forEach(function (s) {
+            container.appendChild(renderSignSegment(s));
+          });
+        }
       }
+
+      document.getElementById('themeSelect').addEventListener('change', function () {
+        var selected = allThemes.find(function (t) { return t.id === this.value; }.bind(this));
+        if (selected) applyTheme(selected);
+        if (viewerId) {
+          fetch('/v1/viewers/' + viewerId + '/preferences', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sign_overlay_theme: this.value })
+          }).catch(function () {});
+        }
+      });
 
       const sse = new EventSource('/v1/streams/' + streamId + '/events/stream');
       sse.onmessage = function (e) {
         try {
-          const data = JSON.parse(e.data);
+          var data = JSON.parse(e.data);
           if (data.type === 'segment') {
             captionLines.push('[' + data.segment.start + '] ' + data.segment.text);
             audioLines.push('[' + data.audio_description.start + '] ' + data.audio_description.text);
+            renderCaptionsAndAudio();
             if (data.sign && data.sign.gloss_tokens) {
-              signLines.push('[' + data.sign.start + '] ' + data.sign.gloss_tokens.join(' '));
+              clearSignEmpty();
+              document.getElementById('signSegments').appendChild(renderSignSegment(data.sign));
             }
-            renderPanels();
           } else if (data.type === 'stream.stopped') {
-            document.getElementById('captions').textContent += '\n[stream stopped]';
+            document.getElementById('captions').textContent += '\\n[stream stopped]';
             sse.close();
           }
         } catch (_) {}
@@ -165,14 +351,14 @@ export const streamingUiService = {
       sse.onerror = function () {
         if (!captionLines.length) {
           document.getElementById('captions').textContent = 'SSE connection error. Falling back to snapshot.';
-          initialLoad().catch((err) => {
+          initialLoad().catch(function (err) {
             document.getElementById('captions').textContent = err.message;
           });
           sse.close();
         }
       };
 
-      initialLoad().catch(() => {});
+      loadThemes().then(function () { return initialLoad(); }).catch(function () {});
     </script>
   </body>
 </html>`;

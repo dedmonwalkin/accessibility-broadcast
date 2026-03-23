@@ -7,7 +7,8 @@ import {
   SUPPORTED_OUTPUT_LANGUAGES,
   SUPPORTED_SIGN_LANGUAGES,
   SUPPORTED_SIGN_PRESENTATION_MODES,
-  SUPPORTED_UI_MODES
+  SUPPORTED_UI_MODES,
+  SUPPORTED_SIGN_OVERLAY_THEME_IDS
 } from '../config/accessibilityCatalog.js';
 
 const PROFILE_TO_IMPAIRMENT_MAP = {
@@ -78,6 +79,7 @@ function buildDefaultPreferences(stream) {
     sign_language: stream?.sign_language || 'ASL',
     sign_presentation_mode: stream?.sign_presentation_mode || 'avatar_2d',
     signer_profile: stream?.signer_profile || 'avatar-hope',
+    sign_overlay_theme: 'standard',
     ui_mode: 'default',
     impairment_tags: inferDefaultImpairmentTags(stream)
   };
@@ -101,6 +103,11 @@ function normalizePreferences(input = {}, stream, previous = null) {
       base.sign_presentation_mode
     ),
     signer_profile: input.signer_profile ? String(input.signer_profile).trim() : base.signer_profile,
+    sign_overlay_theme: normalizeEnum(
+      input.sign_overlay_theme,
+      SUPPORTED_SIGN_OVERLAY_THEME_IDS,
+      base.sign_overlay_theme
+    ),
     ui_mode: normalizeEnum(input.ui_mode, SUPPORTED_UI_MODES, base.ui_mode),
     impairment_tags: normalizeImpairmentTags(input.impairment_tags, base.impairment_tags)
   };
@@ -164,6 +171,7 @@ export const viewerPreferencesService = {
         output_languages: SUPPORTED_OUTPUT_LANGUAGES,
         sign_languages: SUPPORTED_SIGN_LANGUAGES,
         sign_presentation_modes: SUPPORTED_SIGN_PRESENTATION_MODES,
+        sign_overlay_themes: SUPPORTED_SIGN_OVERLAY_THEME_IDS,
         ui_modes: SUPPORTED_UI_MODES,
         impairment_tags: SUPPORTED_IMPAIRMENT_TYPES
       }

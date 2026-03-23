@@ -12,6 +12,7 @@ import { streamingUiService } from './services/streamingUiService.js';
 import { streamEmitter } from './services/streamingService.js';
 import { persistenceService } from './services/persistence/persistenceService.js';
 import { runtimeConfig } from './config/runtime.js';
+import { SIGN_OVERLAY_THEMES } from './config/accessibilityCatalog.js';
 import { generateRequestId, logRequest, getMetrics as getRequestMetrics, incrementConnections, decrementConnections, incrementSse, decrementSse, incrementSseEvents } from './utils/logger.js';
 
 const runtime = runtimeConfig();
@@ -49,6 +50,7 @@ function isPublicPath(method, pathname) {
   if (pathname === '/feedback') return true;
   if (pathname.startsWith('/viewer/')) return true;
   if (pathname === '/v1/embed/overlay.js') return true;
+  if (pathname === '/v1/sign-overlay-themes') return true;
   if (pathname.startsWith('/v1/streams/') && pathname.endsWith('/events/stream')) return true;
   return false;
 }
@@ -151,6 +153,10 @@ async function route(req, res) {
         kind: url.searchParams.get('kind') || 'default',
         resources: accessibilityService.getResources({ kind: url.searchParams.get('kind') })
       });
+    }
+
+    if (method === 'GET' && pathname === '/v1/sign-overlay-themes') {
+      return sendJson(res, 200, { themes: SIGN_OVERLAY_THEMES });
     }
 
     if (method === 'POST' && pathname === '/v1/streams') {

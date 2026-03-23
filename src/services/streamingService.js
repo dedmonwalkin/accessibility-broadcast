@@ -17,12 +17,18 @@ import {
   SUPPORTED_OUTPUT_LANGUAGES,
   SUPPORTED_SIGN_LANGUAGES,
   SUPPORTED_SIGN_PRESENTATION_MODES,
-  SUPPORTED_UI_MODES
+  SUPPORTED_UI_MODES,
+  SIGN_OVERLAY_THEMES
 } from '../config/accessibilityCatalog.js';
 import { viewerPreferencesService } from './viewerPreferencesService.js';
 
 const SUPPORTED_PROTOCOLS = new Set(['rtmp', 'srt']);
 const DEFAULT_SIGNER = 'avatar-hope';
+const DEFAULT_THEME = SIGN_OVERLAY_THEMES.find((t) => t.id === 'standard');
+
+function resolveSignOverlayTheme(themeId) {
+  return SIGN_OVERLAY_THEMES.find((t) => t.id === themeId) || DEFAULT_THEME;
+}
 
 function toSeconds(iso) {
   return Math.floor(new Date(iso).getTime() / 1000);
@@ -603,6 +609,8 @@ export const streamingService = {
       : stream.sign_language;
 
     const signerProfile = viewer?.signer_profile || stream.signer_profile;
+    const themeId = viewer?.sign_overlay_theme || 'standard';
+    const theme = resolveSignOverlayTheme(themeId);
 
     return {
       stream_id: id,
@@ -610,6 +618,8 @@ export const streamingService = {
       sign_language: signLanguage,
       signer_profile: signerProfile,
       sign_presentation_mode: signPresentationMode,
+      sign_overlay_theme: theme.id,
+      theme,
       overlay_url: `/v1/streams/${id}/sign-overlay.m3u8`,
       chroma_key: '#00FF00',
       segments: outputs.signScript,

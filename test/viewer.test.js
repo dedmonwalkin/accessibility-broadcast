@@ -105,6 +105,48 @@ test('submits and queries feedback', async () => {
   assert.equal(summary.by_issue_type.sign_overlay, 1);
 });
 
+test('sign_overlay_theme defaults to standard', () => {
+  resetStore();
+  const stream = streamingService.createStream({ name: 'Theme Default Test' });
+  const viewer = viewerPreferencesService.createViewer({ stream_id: stream.id });
+
+  assert.equal(viewer.preferences.sign_overlay_theme, 'standard');
+});
+
+test('sign_overlay_theme falls back on invalid value', () => {
+  resetStore();
+  const stream = streamingService.createStream({ name: 'Theme Fallback Test' });
+  const viewer = viewerPreferencesService.createViewer({
+    stream_id: stream.id,
+    preferences: { sign_overlay_theme: 'nonexistent' }
+  });
+
+  assert.equal(viewer.preferences.sign_overlay_theme, 'standard');
+});
+
+test('sign_overlay_theme can be updated', () => {
+  resetStore();
+  const stream = streamingService.createStream({ name: 'Theme Update Test' });
+  const viewer = viewerPreferencesService.createViewer({ stream_id: stream.id });
+
+  viewerPreferencesService.updatePreferences(viewer.id, { sign_overlay_theme: 'kids' });
+
+  const result = viewerPreferencesService.getPreferences(viewer.id);
+  assert.equal(result.preferences.sign_overlay_theme, 'kids');
+});
+
+test('getPreferences includes sign_overlay_themes in supported list', () => {
+  resetStore();
+  const stream = streamingService.createStream({ name: 'Theme Supported Test' });
+  const viewer = viewerPreferencesService.createViewer({ stream_id: stream.id });
+
+  const result = viewerPreferencesService.getPreferences(viewer.id);
+  assert.ok(Array.isArray(result.supported.sign_overlay_themes));
+  assert.ok(result.supported.sign_overlay_themes.includes('standard'));
+  assert.ok(result.supported.sign_overlay_themes.includes('kids'));
+  assert.ok(result.supported.sign_overlay_themes.includes('high_contrast'));
+});
+
 test('ad session tracking and reporting', async () => {
   resetStore();
   const stream = streamingService.createStream({ name: 'Ad Test' });

@@ -121,6 +121,24 @@ test('throws when ingesting chunk on non-running stream', async () => {
   );
 });
 
+test('getSignOverlay includes resolved theme', async () => {
+  resetStore();
+  const stream = streamingService.createStream({ name: 'Sign Theme Test' });
+  await streamingService.startStream(stream.id, {
+    protocol: 'rtmp',
+    source_url: 'rtmp://test/sign-theme'
+  });
+
+  const overlay = streamingService.getSignOverlay(stream.id);
+  assert.equal(overlay.sign_overlay_theme, 'standard');
+  assert.ok(overlay.theme);
+  assert.equal(overlay.theme.id, 'standard');
+  assert.ok(overlay.theme.palette);
+  assert.ok(overlay.theme.background);
+  assert.ok(overlay.theme.font);
+  assert.equal(typeof overlay.theme.layout, 'string');
+});
+
 test('getCaptions returns VTT format by default', async () => {
   resetStore();
   const stream = streamingService.createStream({ name: 'Caption Test' });
