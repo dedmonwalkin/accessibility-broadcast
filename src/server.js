@@ -18,6 +18,8 @@ import { accessibilityService } from './services/accessibilityService.js';
 import { streamingUiService } from './services/streamingUiService.js';
 import { streamEmitter } from './services/streamingService.js';
 import { persistenceService } from './services/persistence/persistenceService.js';
+import { cleanupService } from './services/cleanupService.js';
+import { buildErrorPage, buildLandingPage } from './services/uiShared.js';
 import { runtimeConfig } from './config/runtime.js';
 import { SIGN_OVERLAY_THEMES } from './config/accessibilityCatalog.js';
 import {
@@ -62,6 +64,7 @@ function extractParams(pathname, pattern) {
 }
 
 function isPublicPath(method, pathname) {
+  if (pathname === '/') return true;
   if (pathname === '/health') return true;
   if (pathname === '/healthz') return true;
   if (pathname === '/readyz') return true;
@@ -173,6 +176,10 @@ async function route(req, res) {
   const method = req.method.toUpperCase();
 
   try {
+    if (method === 'GET' && pathname === '/') {
+      return sendHtml(res, 200, buildLandingPage());
+    }
+
     if (method === 'GET' && pathname === '/health') {
       return sendJson(res, 200, { ok: true, service: 'accessibility-broadcast' });
     }
@@ -518,16 +525,30 @@ async function route(req, res) {
       });
     }
 
-    return notFound(res);
+    return sendNotFound(req, res);
   } catch (error) {
-    return handleError(res, error, requestId);
+    return handleError(req, res, error, requestId);
   } finally {
     decrementConnections();
     logRequest({ method, path: pathname, statusCode: res.statusCode, durationMs: Date.now() - startTime, requestId });
   }
 }
 
-function handleError(res, error, requestId) {
+function wantsHtml(req) {
+  const accept = String(req.headers['accept'] || '');
+  if (!accept) return false;
+  if (accept.includes('application/json')) return false;
+  return accept.includes('text/html') || accept.includes('*/*') && req.method === 'GET';
+}
+
+function sendNotFound(req, res) {
+  if (wantsHtml(req)) {
+    return sendHtml(res, 404, buildErrorPage(404, 'Not found', 'This page could not be found.'));
+  }
+  return notFound(res);
+}
+
+function handleError(req, res, error, requestId) {
   if (error instanceof PayloadTooLargeError) {
     return sendJson(res, 413, { error: 'payload_too_large', limit_bytes: error.limit });
   }
@@ -547,6 +568,9 @@ function handleError(res, error, requestId) {
     message: error?.message,
     stack: error?.stack
   }));
+  if (wantsHtml(req)) {
+    return sendHtml(res, 500, buildErrorPage(500, 'Something went wrong', 'An internal error occurred. Reference: ' + requestId));
+  }
   return sendJson(res, 500, { error: 'internal_error', request_id: requestId });
 }
 
@@ -580,6 +604,31 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const rlCleanup = setInterval(() => cleanupRateLimitWindows(), 5 * 60_000);
     if (typeof rlCleanup.unref === 'function') rlCleanup.unref();
     cleanupTimers.push(rlCleanup);
+
+    if (runtime.cleanupIntervalMs > 0) {
+      const retentionOpts = {
+        streamTtlMs: runtime.retainStoppedStreamsMs,
+        incidentTtlMs: runtime.retainResolvedIncidentsMs,
+        feedbackTtlMs: runtime.retainFeedbackMs,
+        adSessionTtlMs: runtime.retainAdSessionsMs,
+        auditLogMaxEntries: runtime.auditLogMaxEntries
+      };
+      const retentionTimer = setInterval(() => {
+        try {
+          cleanupService.run(retentionOpts);
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error(JSON.stringify({
+            ts: new Date().toISOString(),
+            level: 'error',
+            message: 'cleanup.run.failed',
+            error: err?.message
+          }));
+        }
+      }, runtime.cleanupIntervalMs);
+      if (typeof retentionTimer.unref === 'function') retentionTimer.unref();
+      cleanupTimers.push(retentionTimer);
+    }
   });
 
   async function shutdown() {

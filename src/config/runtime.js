@@ -62,6 +62,12 @@ export function runtimeConfig() {
     outboundAllowInsecure: parseBoolEnv(env.OUTBOUND_ALLOW_INSECURE, !isProd),
     lowConfidenceThreshold: Number(env.LOW_CONFIDENCE_THRESHOLD || 0.72),
     maxSseListeners: parseIntEnv(env.MAX_SSE_LISTENERS, 'MAX_SSE_LISTENERS', 200),
-    sseIdleTimeoutMs: parseIntEnv(env.SSE_IDLE_TIMEOUT_MS, 'SSE_IDLE_TIMEOUT_MS', 300000)
+    sseIdleTimeoutMs: parseIntEnv(env.SSE_IDLE_TIMEOUT_MS, 'SSE_IDLE_TIMEOUT_MS', 300000),
+    cleanupIntervalMs: parseIntEnv(env.CLEANUP_INTERVAL_MS, 'CLEANUP_INTERVAL_MS', 60 * 60 * 1000),
+    retainStoppedStreamsMs: parseIntEnv(env.RETAIN_STOPPED_STREAMS_MS, 'RETAIN_STOPPED_STREAMS_MS', 24 * 60 * 60 * 1000),
+    retainResolvedIncidentsMs: parseIntEnv(env.RETAIN_RESOLVED_INCIDENTS_MS, 'RETAIN_RESOLVED_INCIDENTS_MS', 7 * 24 * 60 * 60 * 1000),
+    retainFeedbackMs: parseIntEnv(env.RETAIN_FEEDBACK_MS, 'RETAIN_FEEDBACK_MS', 30 * 24 * 60 * 60 * 1000),
+    retainAdSessionsMs: parseIntEnv(env.RETAIN_AD_SESSIONS_MS, 'RETAIN_AD_SESSIONS_MS', 24 * 60 * 60 * 1000),
+    auditLogMaxEntries: parseIntEnv(env.AUDIT_LOG_MAX_ENTRIES, 'AUDIT_LOG_MAX_ENTRIES', 10000)
   };
 }
