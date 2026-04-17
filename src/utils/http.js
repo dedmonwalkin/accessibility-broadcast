@@ -9,14 +9,40 @@ export function sendJson(res, statusCode, payload) {
   res.end(body);
 }
 
-export async function parseBody(req) {
+export function sendHtml(res, statusCode, html, extraHeaders = {}) {
+  res.writeHead(statusCode, {
+    'Content-Type': 'text/html; charset=utf-8',
+    ...extraHeaders
+  });
+  res.end(html);
+}
+
+export class PayloadTooLargeError extends Error {
+  constructor(limit) {
+    super('payload_too_large');
+    this.statusCode = 413;
+    this.code = 'payload_too_large';
+    this.limit = limit;
+  }
+}
+
+export async function parseBody(req, { maxBytes = 1024 * 1024 } = {}) {
+  const contentLength = Number(req.headers['content-length'] || 0);
+  if (Number.isFinite(contentLength) && contentLength > 0 && contentLength > maxBytes) {
+    throw new PayloadTooLargeError(maxBytes);
+  }
   const chunks = [];
+  let received = 0;
   for await (const chunk of req) {
+    received += chunk.length;
+    if (received > maxBytes) {
+      throw new PayloadTooLargeError(maxBytes);
+    }
     chunks.push(chunk);
   }
   const raw = Buffer.concat(chunks).toString('utf8');
-  if (!raw) return { raw, parsed: {}, contentType: String(req.headers['content-type'] || '').toLowerCase() };
   const contentType = String(req.headers['content-type'] || '').toLowerCase();
+  if (!raw) return { raw, parsed: {}, contentType };
   if (contentType.includes('application/x-www-form-urlencoded')) {
     const params = new URLSearchParams(raw);
     return { raw, parsed: Object.fromEntries(params.entries()), contentType };
@@ -24,12 +50,15 @@ export async function parseBody(req) {
   try {
     return { raw, parsed: JSON.parse(raw), contentType };
   } catch {
-    throw new Error('Invalid JSON body');
+    const err = new Error('invalid_json_body');
+    err.statusCode = 400;
+    err.code = 'invalid_json_body';
+    throw err;
   }
 }
 
-export async function parseJsonBody(req) {
-  const { parsed } = await parseBody(req);
+export async function parseJsonBody(req, opts) {
+  const { parsed } = await parseBody(req, opts);
   return parsed;
 }
 
@@ -38,9 +67,9 @@ export function parseUrl(req) {
 }
 
 export function notFound(res) {
-  sendJson(res, 404, { error: 'Not found' });
+  sendJson(res, 404, { error: 'not_found' });
 }
 
 export function methodNotAllowed(res) {
-  sendJson(res, 405, { error: 'Method not allowed' });
+  sendJson(res, 405, { error: 'method_not_allowed' });
 }

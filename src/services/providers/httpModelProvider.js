@@ -1,4 +1,6 @@
 import { mockModelProvider } from './mockModelProvider.js';
+import { validateOutboundBaseUrl } from '../../utils/security.js';
+import { runtimeConfig } from '../../config/runtime.js';
 
 const DEFAULT_TIMEOUT_MS = Number(process.env.MODEL_HTTP_TIMEOUT_MS || 4000);
 
@@ -27,8 +29,15 @@ async function postJson({ endpoint, payload, timeoutMs, headers = {}, signal }) 
         ...headers
       },
       body: JSON.stringify(payload),
-      signal: timeout.signal
+      signal: timeout.signal,
+      // Never auto-follow redirects: credentials in `Authorization` must not
+      // be silently re-sent to a different origin.
+      redirect: 'manual'
     });
+
+    if (response.status >= 300 && response.status < 400) {
+      throw new Error(`HTTP model provider redirect refused: ${response.status}`);
+    }
 
     if (!response.ok) {
       throw new Error(`HTTP model provider failed: ${response.status}`);
@@ -45,14 +54,31 @@ function endpoint(baseUrl, path) {
 }
 
 export function createHttpModelProvider(config = {}) {
-  const baseUrl = config.base_url || process.env.MODEL_HTTP_BASE_URL;
+  const rt = runtimeConfig();
+  const rawBaseUrl = config.base_url || process.env.MODEL_HTTP_BASE_URL;
   const apiKey = config.api_key || process.env.MODEL_HTTP_API_KEY;
   const timeoutMs = Number(config.timeout_ms || DEFAULT_TIMEOUT_MS);
 
-  if (!baseUrl) {
+  if (!rawBaseUrl) {
     return {
       ...mockModelProvider,
       name: 'mock(http_missing_base_url)'
+    };
+  }
+
+  let baseUrl;
+  try {
+    baseUrl = validateOutboundBaseUrl(rawBaseUrl, {
+      allowInsecure: rt.outboundAllowInsecure,
+      allowPrivate: rt.outboundAllowPrivate,
+      allowHosts: rt.modelProviderAllowedHosts
+    });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn(`[accessibility-broadcast] MODEL_HTTP_BASE_URL rejected: ${err.message}; falling back to mock provider.`);
+    return {
+      ...mockModelProvider,
+      name: `mock(http_base_url_rejected:${err.message})`
     };
   }
 
