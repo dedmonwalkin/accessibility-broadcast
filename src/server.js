@@ -34,6 +34,7 @@ import {
 } from './utils/logger.js';
 import { buildKeyStore, extractBearer, SCOPE_ADMIN, SCOPE_STANDARD } from './utils/auth.js';
 import { requireValidId } from './utils/security.js';
+import { seams, resolveTenantFromHeaders } from './services/seams/index.js';
 
 const runtime = runtimeConfig();
 const PORT = runtime.port;
@@ -85,12 +86,23 @@ function isAdminPath(pathname) {
   return pathname.startsWith('/v1/admin/') || pathname.startsWith('/v1/debug/');
 }
 
-// Returns the authenticated scope ('admin' | 'standard'), or null if unauth.
-function authorize(req) {
-  if (runtime.authDisabled) return SCOPE_ADMIN;
-  if (keyStore.size === 0) return null; // fail-closed when no keys configured
+// Returns { scope, tenant } for the authenticated caller, or null.
+// tenant is { orgId, projectId } | null, resolved via the IdentityProvider
+// seam when configured, or from X-Org-Id / X-Project-Id dev headers
+// when the default noop identity provider is active.
+async function authorize(req) {
+  if (runtime.authDisabled) {
+    return { scope: SCOPE_ADMIN, tenant: resolveTenantFromHeaders(req) };
+  }
+  if (keyStore.size === 0) return null;
   const token = extractBearer(req);
-  return keyStore.verify(token);
+  const scope = keyStore.verify(token);
+  if (!scope) return null;
+  const resolved = token ? await seams.identity.resolveApiKey(token) : null;
+  const tenant = resolved && (resolved.orgId || resolved.projectId)
+    ? { orgId: resolved.orgId || null, projectId: resolved.projectId || null }
+    : resolveTenantFromHeaders(req);
+  return { scope, tenant };
 }
 
 function clientIp(req) {
@@ -210,7 +222,9 @@ async function route(req, res) {
     }
 
     const requiresAuth = !isPublicPath(method, pathname);
-    const scope = authorize(req);
+    const auth = await authorize(req);
+    const scope = auth ? auth.scope : null;
+    const tenant = auth ? auth.tenant : null;
     if (requiresAuth && !scope) {
       return sendJson(res, 401, { error: 'unauthorized' });
     }
@@ -220,6 +234,7 @@ async function route(req, res) {
         return sendJson(res, 403, { error: 'forbidden', required_scope: SCOPE_ADMIN });
       }
     }
+    req.tenant = tenant;
 
     if (method === 'GET' && pathname === '/v1/accessibility/resources') {
       return sendJson(res, 200, {
@@ -322,6 +337,13 @@ async function route(req, res) {
       });
       res.write(': connected\n\n');
       incrementSse();
+      const sseStart = Date.now();
+      seams.usage.record({
+        kind: 'sse_connect',
+        streamId: streamSse.id,
+        ts: new Date().toISOString(),
+        tenant: req.tenant || null
+      });
 
       const idleTimeout = setTimeout(() => {
         res.end();
@@ -339,6 +361,11 @@ async function route(req, res) {
         clearTimeout(idleTimeout);
         decrementSse();
         streamEmitter.off(eventKey, onEvent);
+        seams.telemetry.onSse({
+          streamId: streamSse.id,
+          durationMs: Date.now() - sseStart,
+          tenant: req.tenant || null
+        });
       };
       req.on('close', cleanup);
       res.on('error', cleanup);
@@ -530,7 +557,11 @@ async function route(req, res) {
     return handleError(req, res, error, requestId);
   } finally {
     decrementConnections();
-    logRequest({ method, path: pathname, statusCode: res.statusCode, durationMs: Date.now() - startTime, requestId });
+    const durationMs = Date.now() - startTime;
+    logRequest({ method, path: pathname, statusCode: res.statusCode, durationMs, requestId });
+    const tenant = req.tenant || null;
+    seams.telemetry.onRequest({ method, path: pathname, statusCode: res.statusCode, durationMs, requestId, tenant });
+    seams.usage.record({ kind: 'request', method, path: pathname, statusCode: res.statusCode, ts: new Date().toISOString(), tenant });
   }
 }
 
