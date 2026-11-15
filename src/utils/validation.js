@@ -1,7 +1,9 @@
+import { clientError } from './errors.js';
+
 export function assertRequired(body, required) {
   for (const key of required) {
     if (body[key] === undefined || body[key] === null || body[key] === '') {
-      throw new Error(`Missing required field: ${key}`);
+      throw clientError('missing_required_field', `Missing required field: ${key}`, { field: key });
     }
   }
 }

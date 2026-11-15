@@ -171,3 +171,55 @@ test('ad session tracking and reporting', async () => {
   assert.equal(report.counts.completes, 1);
   assert.equal(report.counts.events, 2);
 });
+
+test('campaign reporting deduplicates unattributed feedback and ad tags preserve session attribution', async () => {
+  resetStore();
+  const stream = streamingService.createStream({ name: 'Ad Campaign Feedback Test' });
+  await streamingService.startStream(stream.id, {
+    protocol: 'rtmp',
+    source_url: 'rtmp://test/ad-campaign-feedback'
+  });
+
+  const sessionA = adIntegrationService.createSession({
+    stream_id: stream.id,
+    ad_campaign_id: 'campaign_shared',
+    platform_type: 'web_sdk'
+  });
+  const sessionB = adIntegrationService.createSession({
+    stream_id: stream.id,
+    ad_campaign_id: 'campaign_shared',
+    platform_type: 'web_sdk'
+  });
+
+  feedbackService.create({
+    stream_id: stream.id,
+    source: 'ad',
+    issue_type: 'captions',
+    message: 'Generic stream issue during the ad break.'
+  });
+  const attributedFeedback = feedbackService.create({
+    stream_id: stream.id,
+    ad_session_id: sessionA.id,
+    source: 'ad',
+    issue_type: 'latency',
+    message: 'Overlay arrived late for session A.'
+  });
+
+  const sessionAReport = adIntegrationService.getSessionReport(sessionA.id);
+  const sessionBReport = adIntegrationService.getSessionReport(sessionB.id);
+  const campaignReport = adIntegrationService.getCampaignReport('campaign_shared');
+  const tag = adIntegrationService.buildAdTag(sessionA.id);
+
+  assert.equal(sessionAReport.counts.feedback, 1);
+  assert.equal(sessionAReport.feedback_recent.length, 1);
+  assert.equal(sessionAReport.feedback_recent[0].id, attributedFeedback.id);
+
+  assert.equal(sessionBReport.counts.feedback, 0);
+  assert.equal(sessionBReport.feedback_recent.length, 0);
+
+  assert.equal(campaignReport.totals.feedback, 2);
+  assert.equal(campaignReport.totals.feedback_attributed, 1);
+  assert.equal(campaignReport.totals.feedback_unattributed, 1);
+
+  assert.match(tag.feedback_url, new RegExp(`adSessionId=${sessionA.id}$`));
+});

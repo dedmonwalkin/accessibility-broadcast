@@ -1,5 +1,6 @@
 import { store } from '../data/store.js';
 import { assertRequired } from '../utils/validation.js';
+import { clientError } from '../utils/errors.js';
 import { SUPPORTED_IMPAIRMENT_TYPES } from '../config/accessibilityCatalog.js';
 
 function normalizeRating(value) {
@@ -36,16 +37,16 @@ export const feedbackService = {
     assertRequired(input, ['stream_id', 'message']);
 
     const stream = store.streams.get(input.stream_id);
-    if (!stream) throw new Error('Stream not found for feedback');
+    if (!stream) throw clientError('stream_not_found', 'Stream not found for feedback');
 
     const id = store.nextId('feedback');
     const adSessionId = input.ad_session_id ? String(input.ad_session_id) : null;
     const viewerId = input.viewer_id ? String(input.viewer_id) : null;
     if (adSessionId && !store.adSessions.has(adSessionId)) {
-      throw new Error('Ad session not found for feedback');
+      throw clientError('ad_session_not_found', 'Ad session not found for feedback');
     }
     if (viewerId && !store.viewerProfiles.has(viewerId)) {
-      throw new Error('Viewer profile not found for feedback');
+      throw clientError('viewer_not_found', 'Viewer profile not found for feedback');
     }
 
     const entry = {

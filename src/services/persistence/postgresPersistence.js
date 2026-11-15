@@ -2,10 +2,26 @@ import { store } from '../../data/store.js';
 import { exportState, importState } from './stateSerializer.js';
 
 export class PostgresPersistence {
-  constructor({ databaseUrl }) {
+  constructor({ databaseUrl, ssl }) {
     this.databaseUrl = databaseUrl;
+    this.sslMode = String(ssl || 'prefer').toLowerCase();
     this.client = null;
     this.enabled = false;
+  }
+
+  sslOption() {
+    // Mirrors libpq's sslmode semantics for the pg driver.
+    //   disable: never use TLS
+    //   allow / prefer: let the driver negotiate (node-pg: default behavior)
+    //   require: must use TLS; do not verify CA
+    //   verify-ca / verify-full: must use TLS and verify the server cert
+    if (this.sslMode === 'disable') return false;
+    if (this.sslMode === 'allow' || this.sslMode === 'prefer') return undefined;
+    if (this.sslMode === 'require') return { rejectUnauthorized: false };
+    if (this.sslMode === 'verify-ca' || this.sslMode === 'verify-full') {
+      return { rejectUnauthorized: true };
+    }
+    return undefined;
   }
 
   async init() {
@@ -21,7 +37,11 @@ export class PostgresPersistence {
     }
 
     const { Client } = pg;
-    this.client = new Client({ connectionString: this.databaseUrl });
+    const sslOption = this.sslOption();
+    this.client = new Client({
+      connectionString: this.databaseUrl,
+      ...(sslOption !== undefined ? { ssl: sslOption } : {})
+    });
     await this.client.connect();
 
     await this.client.query(`

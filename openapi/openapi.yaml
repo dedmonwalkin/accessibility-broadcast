@@ -58,6 +58,51 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Stream'
+  /v1/streams/{id}/ingest/chunk:
+    post:
+      summary: Ingest an audio chunk and publish original output before translation
+      description: The original SSE event is sent before translation. This HTTP response still waits for translation work to finish.
+      parameters:
+        - $ref: '#/components/parameters/StreamId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                audio_base64:
+                  type: string
+                format:
+                  type: string
+                duration_ms:
+                  type: number
+      responses:
+        '201':
+          description: Segment generated and translation processing completed
+  /v1/streams/{id}/events/stream:
+    get:
+      summary: Receive personalized live output and translation updates
+      description: Starts with a snapshot, then segment, caption.translation and stream.stopped JSON data messages. Caption updates merge by segment ID. See docs/live-caption-delivery.md.
+      parameters:
+        - $ref: '#/components/parameters/StreamId'
+        - in: query
+          name: viewer_id
+          schema:
+            type: string
+        - in: query
+          name: language
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Server-sent events with viewer caption and audio preferences applied
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '400':
+          description: Unknown stream or invalid viewer profile
   /v1/streams/{id}/captions:
     get:
       summary: Get captions
