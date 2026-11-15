@@ -68,8 +68,6 @@ Goal: a team can run this in production with observability and clear scale limit
 
 ## What is **not** planned
 
-- An AGPL relicense of the OSS core. See `GOVERNANCE.md`.
-- A mandatory CLA. Inbound = outbound Apache-2.0.
 - Bundling a specific ASR, TTS, or translation vendor. The plugin seams
   stay vendor-neutral.
 

@@ -12,7 +12,7 @@ final say on:
 - Accepting or rejecting contributions.
 - Release timing and versioning.
 - The contents of the roadmap (`ROADMAP.md`).
-- The open-core seam interfaces (see below).
+- The seam interfaces (see `src/services/seams/`).
 
 This is not forever. When sustained external contribution arrives — defined
 roughly as "three or more contributors with a pattern of merged PRs over
@@ -39,27 +39,28 @@ Appointed by the existing maintainer(s).
   non-trivial size, license change): an issue tagged `rfc:` must stay open at
   least 7 days. Any maintainer objection is sufficient to block; two must
   agree to proceed if more than one maintainer exists.
-- **License changes to the OSS core**: require written sign-off from every
-  listed copyright holder in `NOTICE`. We do not intend to change the OSS
-  license. This is a guarantee, not a footnote.
+- **License changes**: decided by the copyright holder(s) listed in `NOTICE`,
+  through the RFC process above.
 
-## Open-core commitment
+## Licensing
 
-The code in this repository is, and will remain, Apache-2.0 licensed. A
-separate commercial edition may exist in the future under a different license
-(e.g. BUSL-1.1 with time-based conversion). The following guarantees apply:
+The code in this repository is licensed under Apache-2.0 (see `LICENSE`).
+Rights granted under that license for code already published here cannot be
+withdrawn.
 
-1. **We will not relicense existing OSS code.** Any commercial-only
-   functionality ships in a separate repository and/or separate package.
-2. **We will not gate bug fixes or security patches** behind the commercial
-   edition. All critical/high security fixes land in OSS.
-3. **Interfaces stay in OSS.** The seam interfaces
-   (`UsageEventSink`, `TelemetrySink`, `AuditLogSink`, `IdentityProvider`,
-   `ModelProvider`) are public API. Anyone can ship a compatible
-   implementation.
-4. **No Contributor License Agreement (CLA)** is required. Inbound = outbound
-   Apache-2.0 under the DCO (`Signed-off-by` in commit messages, optional but
-   encouraged).
+This document makes no commitment about the license of future versions and
+does not describe or promise a commercial edition. If the license for future
+versions changes, the change will be proposed in a pull request against this
+file before it takes effect.
+
+Contributions are accepted under the license of the project at the time they
+are made (inbound = outbound). A `Signed-off-by` line (DCO) in commit messages
+is encouraged. The maintainer may ask for a contributor agreement before
+accepting a substantial outside contribution.
+
+The seam interfaces (`UsageEventSink`, `TelemetrySink`, `AuditLogSink`,
+`IdentityProvider`, `ModelProvider`) are public extension points. Anyone can
+ship a compatible implementation.
 
 ## Trademarks
 
