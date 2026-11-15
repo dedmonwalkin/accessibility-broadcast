@@ -1,3 +1,5 @@
+import { jsonForScript } from '../utils/security.js';
+
 export function escapeHtml(value) {
   return String(value)
     .replaceAll('&', '&amp;')
@@ -261,9 +263,9 @@ export const streamingUiService = {
       </div>
     </main>
     <script>
-      var streamId = ${JSON.stringify(streamId)};
-      var viewerId = ${JSON.stringify(viewerId || '')};
-      var feedbackPathVal = ${JSON.stringify(feedbackHref)};
+      var streamId = ${jsonForScript(streamId)};
+      var viewerId = ${jsonForScript(viewerId || '')};
+      var feedbackPathVal = ${jsonForScript(feedbackHref)};
       var feedbackUrl = window.location.origin + feedbackPathVal;
       var viewerQuery = viewerId ? ('?viewer_id=' + encodeURIComponent(viewerId)) : '';
 
@@ -553,10 +555,10 @@ export const streamingUiService = {
     </main>
 
     <script>
-      var streamId = ${JSON.stringify(streamId || '')};
-      var source = ${JSON.stringify(source || 'viewer')};
-      var adSessionId = ${JSON.stringify(adSessionId || '')};
-      var viewerId = ${JSON.stringify(viewerId || '')};
+      var streamId = ${jsonForScript(streamId || '')};
+      var source = ${jsonForScript(source || 'viewer')};
+      var adSessionId = ${jsonForScript(adSessionId || '')};
+      var viewerId = ${jsonForScript(viewerId || '')};
       var form = document.getElementById('feedbackForm');
       var statusEl = document.getElementById('status');
       var submitBtn = document.getElementById('submit-btn');

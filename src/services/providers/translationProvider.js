@@ -1,6 +1,22 @@
 import { runtimeConfig } from '../../config/runtime.js';
+import { validateOutboundBaseUrl } from '../../utils/security.js';
 
 const DEFAULT_TIMEOUT_MS = Number(process.env.TRANSLATION_HTTP_TIMEOUT_MS || 5000);
+
+function safeBaseUrl(raw, rt) {
+  if (!raw) return '';
+  try {
+    return validateOutboundBaseUrl(raw, {
+      allowInsecure: rt.outboundAllowInsecure,
+      allowPrivate: rt.outboundAllowPrivate,
+      allowHosts: rt.modelProviderAllowedHosts
+    });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn(`[accessibility-broadcast] translation base URL rejected: ${err.message}; falling back to mock provider.`);
+    return null;
+  }
+}
 
 function withTimeout(timeoutMs) {
   const controller = new AbortController();
@@ -66,7 +82,8 @@ function createLibreTranslateProvider({ baseUrl, apiKey }) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
-          signal: t.signal
+          signal: t.signal,
+          redirect: 'manual'
         });
         if (!res.ok) throw new Error(`LibreTranslate error: ${res.status}`);
         const data = await res.json();
@@ -105,7 +122,8 @@ function createDeeplProvider({ apiKey, baseUrl }) {
             Authorization: `DeepL-Auth-Key ${apiKey}`
           },
           body: JSON.stringify({ text: [text], target_lang: target }),
-          signal: t.signal
+          signal: t.signal,
+          redirect: 'manual'
         });
         if (!res.ok) throw new Error(`DeepL error: ${res.status}`);
         const data = await res.json();
@@ -122,17 +140,22 @@ function createDeeplProvider({ apiKey, baseUrl }) {
 }
 
 export function createTranslationProvider(config = {}) {
+  const rt = runtimeConfig();
   const provider = String(config.provider || process.env.TRANSLATION_PROVIDER || 'mock').toLowerCase();
-  const baseUrl = config.baseUrl || process.env.TRANSLATION_HTTP_BASE_URL || '';
+  const rawBaseUrl = config.baseUrl || process.env.TRANSLATION_HTTP_BASE_URL || '';
   const apiKey = config.apiKey || process.env.TRANSLATION_API_KEY || '';
 
   if (provider === 'libretranslate') {
-    if (!baseUrl) return { ...mockTranslationProvider, name: 'mock(libretranslate_missing_base_url)' };
+    if (!rawBaseUrl) return { ...mockTranslationProvider, name: 'mock(libretranslate_missing_base_url)' };
+    const baseUrl = safeBaseUrl(rawBaseUrl, rt);
+    if (!baseUrl) return { ...mockTranslationProvider, name: 'mock(libretranslate_base_url_rejected)' };
     return createLibreTranslateProvider({ baseUrl, apiKey });
   }
 
   if (provider === 'deepl') {
     if (!apiKey) return { ...mockTranslationProvider, name: 'mock(deepl_missing_api_key)' };
+    const baseUrl = rawBaseUrl ? safeBaseUrl(rawBaseUrl, rt) : '';
+    if (rawBaseUrl && !baseUrl) return { ...mockTranslationProvider, name: 'mock(deepl_base_url_rejected)' };
     return createDeeplProvider({ apiKey, baseUrl });
   }
 

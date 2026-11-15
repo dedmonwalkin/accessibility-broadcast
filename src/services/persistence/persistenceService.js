@@ -16,7 +16,10 @@ let active = new NoopPersistence();
 export const persistenceService = {
   async configure(runtime) {
     if (runtime.enablePostgres) {
-      const postgres = new PostgresPersistence({ databaseUrl: runtime.databaseUrl });
+      const postgres = new PostgresPersistence({
+        databaseUrl: runtime.databaseUrl,
+        ssl: runtime.databaseSsl
+      });
       const status = await postgres.init();
       if (status.enabled) {
         active = postgres;

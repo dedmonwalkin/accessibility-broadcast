@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { seams } from '../services/seams/index.js';
 
 export class InMemoryStore {
   constructor() {
@@ -30,6 +31,7 @@ export class InMemoryStore {
     this.auditLog.push(record);
     // eslint-disable-next-line no-console
     console.log(JSON.stringify({ ts: record.createdAt, action, ...payload }));
+    seams.audit.record(record);
     return record;
   }
 }

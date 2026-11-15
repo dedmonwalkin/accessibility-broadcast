@@ -1,0 +1,17 @@
+# Default owner — every PR gets a review request from the maintainer.
+*       @dedmonwalkin
+
+# Seam interfaces are load-bearing for the commercial path.
+# Changes here require explicit maintainer review.
+/src/services/providers/             @dedmonwalkin
+/src/services/persistence/           @dedmonwalkin
+/src/sinks/                          @dedmonwalkin
+
+# Governance and trust surface — maintainer-only.
+/LICENSE                             @dedmonwalkin
+/NOTICE                              @dedmonwalkin
+/SECURITY.md                         @dedmonwalkin
+/GOVERNANCE.md                       @dedmonwalkin
+/CODE_OF_CONDUCT.md                  @dedmonwalkin
+/PRIVACY.md                          @dedmonwalkin
+/ROADMAP.md                          @dedmonwalkin
