@@ -10,9 +10,11 @@ on:
 permissions:
   contents: read
 
+# A newer push to a pull request replaces its older run. Runs on main are never
+# cancelled, so every commit there gets its own result.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
@@ -22,7 +24,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # package.json declares node >=20 and the Dockerfile ships Node 20.
+        # package.json declares node >=20; the Docker images ship Node 26.
         node: [20, 22, 24, 26]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -64,3 +66,32 @@ jobs:
           cache: npm
       - run: npm ci
       - run: node --test test/integration/postgres.test.js
+
+  docker:
+    # Builds both images and checks that each container starts and answers its
+    # health route, so a base-image or dependency change cannot break the
+    # shipped containers unnoticed.
+    name: Docker images
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build images
+        run: |
+          docker build -t accessibility-broadcast:ci -f Dockerfile .
+          docker build -t accessibility-broadcast-gateway:ci -f Dockerfile.model-gateway .
+      - name: Start containers and check health
+        run: |
+          # API_KEYS is a throwaway value so the app starts with auth enabled.
+          docker run -d --name app -p 3000:3000 -e API_KEYS=ci-smoke-key accessibility-broadcast:ci
+          docker run -d --name gateway -p 4011:4011 accessibility-broadcast-gateway:ci
+          for url in http://127.0.0.1:3000/health http://127.0.0.1:4011/health; do
+            curl --fail --silent --show-error --retry 15 --retry-delay 1 --retry-all-errors "$url"
+            echo
+          done
+          docker exec app node --version
+      - name: Container logs
+        if: failure()
+        run: |
+          docker logs app || true
+          docker logs gateway || true
