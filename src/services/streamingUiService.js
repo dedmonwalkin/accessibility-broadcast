@@ -1,4 +1,5 @@
 import { jsonForScript } from '../utils/security.js';
+import { createCaptionBuffer } from './liveCaptionClient.js';
 
 export function escapeHtml(value) {
   return String(value)
@@ -273,8 +274,10 @@ export const streamingUiService = {
       document.getElementById('feedbackQr').src = qrUrl;
       document.getElementById('feedbackLink').href = feedbackUrl;
 
-      var captionLines = [];
-      var audioLines = [];
+      var createBuffer = ${createCaptionBuffer.toString()};
+      var captionLines = createBuffer();
+      var audioLines = createBuffer();
+      var signIds = new Set();
       var allThemes = [];
       var sizeMap = { small: '280px', medium: '360px', large: '480px' };
       var errorRegion = document.getElementById('error-region');
@@ -326,14 +329,21 @@ export const streamingUiService = {
         return el;
       }
 
+      function addSign(segment) {
+        if (!segment || signIds.has(segment.id)) return;
+        signIds.add(segment.id);
+        clearSignEmpty();
+        document.getElementById('signSegments').appendChild(renderSignSegment(segment));
+      }
+
       function clearSignEmpty() {
         var empty = document.querySelector('.sign-empty');
         if (empty) empty.remove();
       }
 
       function renderCaptionsAndAudio() {
-        document.getElementById('captions').textContent = captionLines.join('\\n') || 'Waiting for captions...';
-        document.getElementById('audio').textContent = audioLines.join('\\n') || 'Waiting for audio-description segments...';
+        document.getElementById('captions').textContent = captionLines.text() || 'Waiting for captions...';
+        document.getElementById('audio').textContent = audioLines.text() || 'Waiting for audio-description segments...';
       }
 
       async function loadThemes() {
@@ -363,8 +373,8 @@ export const streamingUiService = {
           var signOverlay = results[1];
           var audio = results[2];
 
-          captions.captions.forEach(function (s) { captionLines.push('[' + s.start + '] ' + s.text); });
-          audio.segments.forEach(function (s) { audioLines.push('[' + s.start + '] ' + s.text); });
+          captions.captions.forEach(function (s) { captionLines.upsert(s); });
+          audio.segments.forEach(function (s) { audioLines.upsert(s); });
           renderCaptionsAndAudio();
 
           if (signOverlay.theme) {
@@ -375,7 +385,7 @@ export const streamingUiService = {
             clearSignEmpty();
             var container = document.getElementById('signSegments');
             signOverlay.segments.forEach(function (s) {
-              container.appendChild(renderSignSegment(s));
+              addSign(s);
             });
           }
         } catch (err) {
@@ -395,20 +405,27 @@ export const streamingUiService = {
         }
       });
 
-      var sse = new EventSource('/v1/streams/' + streamId + '/events/stream');
+      var sse = new EventSource('/v1/streams/' + streamId + '/events/stream' + viewerQuery);
       connStatus.textContent = 'Connecting...';
       sse.onopen = function () { connStatus.textContent = 'Live'; };
       sse.onmessage = function (e) {
         try {
           var data = JSON.parse(e.data);
           if (data.type === 'segment') {
-            captionLines.push('[' + data.segment.start + '] ' + data.segment.text);
-            audioLines.push('[' + data.audio_description.start + '] ' + data.audio_description.text);
+            captionLines.upsert(data.segment);
+            audioLines.upsert(data.audio_description);
             renderCaptionsAndAudio();
             if (data.sign && data.sign.gloss_tokens) {
-              clearSignEmpty();
-              document.getElementById('signSegments').appendChild(renderSignSegment(data.sign));
+              addSign(data.sign);
             }
+          } else if (data.type === 'caption.translation') {
+            captionLines.upsert(data.segment);
+            renderCaptionsAndAudio();
+          } else if (data.type === 'snapshot') {
+            data.captions.forEach(function (s) { captionLines.upsert(s); });
+            data.audio_description.forEach(function (s) { audioLines.upsert(s); });
+            (data.sign || []).forEach(addSign);
+            renderCaptionsAndAudio();
           } else if (data.type === 'stream.stopped') {
             document.getElementById('captions').textContent += '\\n[stream stopped]';
             connStatus.textContent = 'Stream ended';
@@ -418,7 +435,7 @@ export const streamingUiService = {
       };
       sse.onerror = function () {
         connStatus.textContent = 'Disconnected — using snapshot';
-        if (!captionLines.length) {
+        if (!captionLines.values().length) {
           document.getElementById('captions').textContent = 'SSE connection error. Falling back to snapshot.';
           initialLoad();
           sse.close();
@@ -661,12 +678,27 @@ export const streamingUiService = {
     const adSessionId = window.ACCESSIBILITY_AD_SESSION_ID || '';
     feedbackLink.href = window.location.origin + '/feedback?streamId=' + encodeURIComponent(streamId) + '&source=overlay&adSessionId=' + encodeURIComponent(adSessionId);
 
-    const sse = new EventSource('/v1/streams/' + streamId + '/events/stream');
+    const viewerId = window.ACCESSIBILITY_VIEWER_ID || '';
+    const language = window.ACCESSIBILITY_CAPTION_LANGUAGE || '';
+    const query = new URLSearchParams();
+    if (viewerId) query.set('viewer_id', viewerId);
+    if (language) query.set('language', language);
+    const suffix = query.toString() ? '?' + query.toString() : '';
+    const buffer = (${createCaptionBuffer.toString()})(1);
+    function renderCaption() {
+      const text = buffer.text();
+      if (text) target.textContent = text;
+    }
+    const sse = new EventSource('/v1/streams/' + streamId + '/events/stream' + suffix);
     sse.onmessage = function (e) {
       try {
         const data = JSON.parse(e.data);
-        if (data.type === 'segment') {
-          target.textContent = data.segment.text;
+        if (data.type === 'segment' || data.type === 'caption.translation') {
+          buffer.upsert(data.segment);
+          renderCaption();
+        } else if (data.type === 'snapshot') {
+          data.captions.forEach(segment => buffer.upsert(segment));
+          renderCaption();
         } else if (data.type === 'stream.stopped') {
           target.textContent = '[stream ended]';
           sse.close();
@@ -674,9 +706,10 @@ export const streamingUiService = {
       } catch (_) {}
     };
     sse.onerror = function () {
-      fetch('/v1/streams/' + streamId + '/captions').then((r) => r.json()).then((payload) => {
-        const last = payload.captions[payload.captions.length - 1];
-        target.textContent = last ? last.text : 'No captions available yet.';
+      fetch('/v1/streams/' + streamId + '/captions' + suffix).then((r) => { if (!r.ok) throw new Error('Could not load captions'); return r.json(); }).then((payload) => {
+        payload.captions.forEach(segment => buffer.upsert(segment));
+        if (buffer.values().length) renderCaption();
+        else target.textContent = 'No captions available yet.';
       }).catch((error) => {
         target.textContent = 'Overlay error: ' + error.message;
       });

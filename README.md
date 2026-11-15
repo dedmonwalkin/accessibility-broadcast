@@ -22,6 +22,12 @@ Server defaults to `http://localhost:3000`.
 npm test
 ```
 
+## Live delivery
+
+Original captions are emitted before translation. Selected-language updates
+follow with the same segment ID, and SSE snapshots recover missed updates on
+reconnection. See [the event contract and timing notes](docs/live-caption-delivery.md).
+
 ## Quick Start
 
 ```bash

@@ -53,9 +53,9 @@ function createBoundedCache() {
 
 const mockTranslationProvider = {
   name: 'mock',
-  async translate(text, targetLanguage) {
-    if (targetLanguage === 'en' || targetLanguage === 'en-US') return text;
-    return `[${targetLanguage}] ${text}`;
+  async translateCaption(text, targetLanguage) {
+    if (targetLanguage === 'en' || targetLanguage === 'en-US') return { text, status: 'original' };
+    return { text: `[${targetLanguage}] ${text}`, status: 'mock' };
   }
 };
 
@@ -65,10 +65,10 @@ function createLibreTranslateProvider({ baseUrl, apiKey }) {
 
   return {
     name: 'libretranslate',
-    async translate(text, targetLanguage, sourceLanguage = 'en') {
+    async translateCaption(text, targetLanguage, sourceLanguage = 'en') {
       const target = targetLanguage.split('-')[0];
       const source = sourceLanguage.split('-')[0];
-      if (target === 'en') return text;
+      if (target === source) return { text, status: 'original' };
 
       const cacheKey = `${target}:${text}`;
       const cached = cache.get(cacheKey);
@@ -87,11 +87,12 @@ function createLibreTranslateProvider({ baseUrl, apiKey }) {
         });
         if (!res.ok) throw new Error(`LibreTranslate error: ${res.status}`);
         const data = await res.json();
-        const result = data.translatedText || text;
+        if (typeof data.translatedText !== 'string' || !data.translatedText.trim()) throw new Error('Missing translated text');
+        const result = { text: data.translatedText, status: 'translated' };
         cache.set(cacheKey, result);
         return result;
       } catch {
-        return `[${targetLanguage}] ${text}`;
+        return { text, status: 'unavailable' };
       } finally {
         t.clear();
       }
@@ -105,9 +106,9 @@ function createDeeplProvider({ apiKey, baseUrl }) {
 
   return {
     name: 'deepl',
-    async translate(text, targetLanguage) {
+    async translateCaption(text, targetLanguage) {
       const target = targetLanguage.toUpperCase().replace('-', '_');
-      if (target === 'EN' || target === 'EN_US') return text;
+      if (target === 'EN' || target === 'EN_US') return { text, status: 'original' };
 
       const cacheKey = `${target}:${text}`;
       const cached = cache.get(cacheKey);
@@ -127,11 +128,13 @@ function createDeeplProvider({ apiKey, baseUrl }) {
         });
         if (!res.ok) throw new Error(`DeepL error: ${res.status}`);
         const data = await res.json();
-        const result = data.translations?.[0]?.text || text;
+        const translated = data.translations?.[0]?.text;
+        if (typeof translated !== 'string' || !translated.trim()) throw new Error('Missing translated text');
+        const result = { text: translated, status: 'translated' };
         cache.set(cacheKey, result);
         return result;
       } catch {
-        return `[${targetLanguage}] ${text}`;
+        return { text, status: 'unavailable' };
       } finally {
         t.clear();
       }
@@ -145,19 +148,22 @@ export function createTranslationProvider(config = {}) {
   const rawBaseUrl = config.baseUrl || process.env.TRANSLATION_HTTP_BASE_URL || '';
   const apiKey = config.apiKey || process.env.TRANSLATION_API_KEY || '';
 
+  // Outbound base URLs are validated (scheme, private hosts, allowlist) before
+  // use; a rejected or missing configuration falls back to a mock whose name
+  // says why, so the fallback is visible in health and logs.
+  let selected = { ...mockTranslationProvider };
   if (provider === 'libretranslate') {
-    if (!rawBaseUrl) return { ...mockTranslationProvider, name: 'mock(libretranslate_missing_base_url)' };
-    const baseUrl = safeBaseUrl(rawBaseUrl, rt);
-    if (!baseUrl) return { ...mockTranslationProvider, name: 'mock(libretranslate_base_url_rejected)' };
-    return createLibreTranslateProvider({ baseUrl, apiKey });
-  }
-
-  if (provider === 'deepl') {
-    if (!apiKey) return { ...mockTranslationProvider, name: 'mock(deepl_missing_api_key)' };
     const baseUrl = rawBaseUrl ? safeBaseUrl(rawBaseUrl, rt) : '';
-    if (rawBaseUrl && !baseUrl) return { ...mockTranslationProvider, name: 'mock(deepl_base_url_rejected)' };
-    return createDeeplProvider({ apiKey, baseUrl });
+    if (!rawBaseUrl) selected.name = 'mock(libretranslate_missing_base_url)';
+    else if (!baseUrl) selected.name = 'mock(libretranslate_base_url_rejected)';
+    else selected = createLibreTranslateProvider({ baseUrl, apiKey });
+  } else if (provider === 'deepl') {
+    const baseUrl = rawBaseUrl ? safeBaseUrl(rawBaseUrl, rt) : '';
+    if (!apiKey) selected.name = 'mock(deepl_missing_api_key)';
+    else if (rawBaseUrl && !baseUrl) selected.name = 'mock(deepl_base_url_rejected)';
+    else selected = createDeeplProvider({ apiKey, baseUrl });
   }
-
-  return mockTranslationProvider;
+  // Keep the string API for existing callers while delivery uses explicit status.
+  selected.translate = async (...args) => (await selected.translateCaption(...args)).text;
+  return selected;
 }
