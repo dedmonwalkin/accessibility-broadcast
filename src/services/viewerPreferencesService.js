@@ -1,5 +1,6 @@
 import { store } from '../data/store.js';
 import { assertRequired } from '../utils/validation.js';
+import { clientError } from '../utils/errors.js';
 import {
   SUPPORTED_AUDIO_DESCRIPTION_STYLES,
   SUPPORTED_CAPTION_STYLES,
@@ -115,7 +116,7 @@ function normalizePreferences(input = {}, stream, previous = null) {
 
 function assertViewer(id) {
   const viewer = store.viewerProfiles.get(id);
-  if (!viewer) throw new Error('Viewer not found');
+  if (!viewer) throw clientError('viewer_not_found', 'Viewer not found');
   return viewer;
 }
 
@@ -124,7 +125,7 @@ export const viewerPreferencesService = {
     assertRequired(input, ['stream_id']);
 
     const stream = store.streams.get(input.stream_id);
-    if (!stream) throw new Error('Stream not found for viewer');
+    if (!stream) throw clientError('stream_not_found', 'Stream not found for viewer');
 
     const id = store.nextId('viewer');
     const now = store.nowIso();
@@ -154,7 +155,7 @@ export const viewerPreferencesService = {
     if (!viewerId) return null;
     const viewer = assertViewer(viewerId);
     if (viewer.stream_id !== streamId) {
-      throw new Error('Viewer profile does not match stream');
+      throw clientError('viewer_stream_mismatch', 'Viewer profile does not match stream');
     }
     return viewer;
   },
@@ -181,7 +182,7 @@ export const viewerPreferencesService = {
   updatePreferences(id, input = {}) {
     const viewer = assertViewer(id);
     const stream = store.streams.get(viewer.stream_id);
-    if (!stream) throw new Error('Stream not found for viewer');
+    if (!stream) throw clientError('stream_not_found', 'Stream not found for viewer');
 
     const patch = input.preferences && typeof input.preferences === 'object' ? input.preferences : input;
     if (input.display_name !== undefined) {

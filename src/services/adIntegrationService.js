@@ -1,5 +1,6 @@
 import { store } from '../data/store.js';
 import { assertRequired } from '../utils/validation.js';
+import { clientError } from '../utils/errors.js';
 
 const VALID_PLATFORM_TYPES = new Set([
   'vast_vmap',
@@ -36,7 +37,7 @@ function normalizeEventType(value) {
 
 function getSession(id) {
   const session = store.adSessions.get(id);
-  if (!session) throw new Error('Ad session not found');
+  if (!session) throw clientError('ad_session_not_found', 'Ad session not found');
   return session;
 }
 
@@ -77,7 +78,7 @@ export const adIntegrationService = {
     assertRequired(input, ['stream_id', 'ad_campaign_id']);
 
     const stream = store.streams.get(input.stream_id);
-    if (!stream) throw new Error('Stream not found for ad session');
+    if (!stream) throw clientError('stream_not_found', 'Stream not found for ad session');
 
     const id = store.nextId('ad_session');
     const now = store.nowIso();

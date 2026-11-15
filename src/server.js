@@ -370,7 +370,11 @@ async function route(req, res) {
         type: 'snapshot', stream_id: streamSse.id, captions: captions.captions,
         audio_description: audio.segments, sign: sign.segments
       })}\n\n`);
+      let closed = false;
       const cleanup = () => {
+        // Runs on both request close and response error; count once.
+        if (closed) return;
+        closed = true;
         clearTimeout(idleTimeout);
         decrementSse();
         streamEmitter.off(eventKey, onEvent);
@@ -601,7 +605,8 @@ function handleError(req, res, error, requestId) {
   if (status >= 400 && status < 500 && code) {
     // Client-visible validation/not-found errors keep their code (plus any
     // structured details such as the missing field) but do not leak raw messages.
-    return sendJson(res, status, { error: code });
+    const details = error.details && typeof error.details === 'object' ? error.details : {};
+    return sendJson(res, status, { ...details, error: code });
   }
   // Internal errors: log server-side, return generic.
   // eslint-disable-next-line no-console

@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { store } from '../data/store.js';
 import { assertRequired } from '../utils/validation.js';
+import { clientError } from '../utils/errors.js';
 import { createModelProvider } from './providers/modelProvider.js';
 import { createTranslationProvider } from './providers/translationProvider.js';
 import { runtimeConfig } from '../config/runtime.js';
@@ -285,7 +286,7 @@ function escapeXml(input) {
 
 function assertStream(id) {
   const stream = store.streams.get(id);
-  if (!stream) throw new Error('Stream not found');
+  if (!stream) throw clientError('stream_not_found', 'Stream not found');
   return stream;
 }
 
@@ -384,7 +385,7 @@ export const streamingService = {
 
     const protocol = String(input.protocol || '').toLowerCase();
     if (!SUPPORTED_PROTOCOLS.has(protocol)) {
-      throw new Error('Unsupported ingest protocol. Use rtmp or srt.');
+      throw clientError('unsupported_ingest_protocol', 'Unsupported ingest protocol. Use rtmp or srt.');
     }
 
     stream.ingest = {
@@ -476,7 +477,7 @@ export const streamingService = {
 
   async ingestChunk(id, input = {}) {
     const stream = assertStream(id);
-    if (stream.status !== 'running') throw new Error('Stream is not running');
+    if (stream.status !== 'running') throw clientError('stream_not_running', 'Stream is not running');
 
     const providerConfig = { provider: stream.model_provider };
     const provider = createModelProvider(providerConfig);
@@ -505,7 +506,7 @@ export const streamingService = {
     const accessibility = await provider.inferAccessibility({ timelineItem, perception, stream });
     const sign = await provider.inferSignScript({ accessibility, timelineItem, stream });
 
-    if (stream.status !== 'running') throw new Error('Stream stopped while processing chunk');
+    if (stream.status !== 'running') throw clientError('stream_not_running', 'Stream stopped while processing chunk');
     outputs.events.push(accessibility);
     const captionSegment = toCaptionSegment(accessibility);
     const audioSegment = toAudioDescriptionSegment(accessibility);
@@ -715,8 +716,8 @@ export const streamingService = {
 
   async resolveIncident(id, input = {}) {
     const incident = store.incidents.get(id);
-    if (!incident) throw new Error('Incident not found');
-    if (incident.status !== 'open') throw new Error('Incident already resolved');
+    if (!incident) throw clientError('incident_not_found', 'Incident not found');
+    if (incident.status !== 'open') throw clientError('incident_already_resolved', 'Incident already resolved');
 
     assertRequired(input, ['resolution']);
 
