@@ -5,9 +5,9 @@ model is intentionally small; it will grow as the project grows.
 
 ## Current model: Benevolent Dictator, with a path out
 
-As of today the project has a single maintainer, who is also the copyright
-holder of the initial work (see `LICENSE` / `NOTICE`). The maintainer has
-final say on:
+As of today the project has a single maintainer. Copyright in the initial
+work is held by the company named in `NOTICE`. The maintainer has final say
+on:
 
 - Accepting or rejecting contributions.
 - Release timing and versioning.
