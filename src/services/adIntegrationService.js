@@ -44,6 +44,34 @@ function countEventsForSession(sessionId) {
   return [...store.adEvents.values()].filter((event) => event.ad_session_id === sessionId);
 }
 
+function listFeedbackForSession(session) {
+  return [...store.feedback.values()].filter(
+    (item) => item.stream_id === session.stream_id && item.ad_session_id === session.id
+  );
+}
+
+function listCampaignFeedback(sessions) {
+  const sessionIds = new Set(sessions.map((item) => item.id));
+  const streamIds = new Set(sessions.map((item) => item.stream_id));
+  const attributed = [];
+  const unattributed = [];
+
+  for (const item of store.feedback.values()) {
+    if (item.ad_session_id) {
+      if (sessionIds.has(item.ad_session_id)) attributed.push(item);
+      continue;
+    }
+
+    if (streamIds.has(item.stream_id)) unattributed.push(item);
+  }
+
+  return {
+    attributed,
+    unattributed,
+    combined: [...attributed, ...unattributed]
+  };
+}
+
 export const adIntegrationService = {
   createSession(input = {}) {
     assertRequired(input, ['stream_id', 'ad_campaign_id']);
@@ -120,9 +148,7 @@ export const adIntegrationService = {
     const session = getSession(sessionId);
     const events = countEventsForSession(sessionId);
     const incidents = [...store.incidents.values()].filter((item) => item.stream_id === session.stream_id);
-    const feedback = [...store.feedback.values()].filter(
-      (item) => item.stream_id === session.stream_id && (item.ad_session_id === sessionId || !item.ad_session_id)
-    );
+    const feedback = listFeedbackForSession(session);
 
     const byEventType = {};
     events.forEach((event) => {
@@ -148,6 +174,7 @@ export const adIntegrationService = {
     const targetCampaign = String(campaignId);
     const sessions = [...store.adSessions.values()].filter((item) => item.ad_campaign_id === targetCampaign);
     const sessionReports = sessions.map((item) => this.getSessionReport(item.id));
+    const campaignFeedback = listCampaignFeedback(sessions);
 
     return {
       ad_campaign_id: targetCampaign,
@@ -161,7 +188,9 @@ export const adIntegrationService = {
       totals: {
         sessions: sessions.length,
         events: sessionReports.reduce((sum, report) => sum + report.counts.events, 0),
-        feedback: sessionReports.reduce((sum, report) => sum + report.counts.feedback, 0),
+        feedback: campaignFeedback.combined.length,
+        feedback_attributed: campaignFeedback.attributed.length,
+        feedback_unattributed: campaignFeedback.unattributed.length,
         incidents: sessionReports.reduce((sum, report) => sum + report.counts.incidents, 0),
         impressions: sessionReports.reduce((sum, report) => sum + report.counts.impressions, 0),
         completes: sessionReports.reduce((sum, report) => sum + report.counts.completes, 0)
@@ -177,7 +206,7 @@ export const adIntegrationService = {
       platform_type: session.platform_type,
       overlay_script_url: '/v1/embed/overlay.js',
       metadata_ping_url: `/v1/ad/sessions/${session.id}/events`,
-      feedback_url: `/feedback?streamId=${encodeURIComponent(session.stream_id)}&source=ad`,
+      feedback_url: `/feedback?streamId=${encodeURIComponent(session.stream_id)}&source=ad&adSessionId=${encodeURIComponent(session.id)}`,
       integration_example: `<script>window.ACCESSIBILITY_STREAM_ID='${session.stream_id}';window.ACCESSIBILITY_AD_SESSION_ID='${session.id}';<\/script><script src="/v1/embed/overlay.js"><\/script>`
     };
   }
