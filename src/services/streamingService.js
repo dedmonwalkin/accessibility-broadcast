@@ -42,7 +42,7 @@ function asTimelineItem(item, index, anchorMs) {
   const speaker = String(item.speaker || 'unknown').trim() || 'unknown';
 
   return {
-    id: `seg_${index + 1}`,
+    id: store.nextId('segment'),
     ts_start: new Date(startMs).toISOString(),
     ts_end: new Date(endMs).toISOString(),
     transcript,
@@ -133,19 +133,57 @@ function normalizeProfiles(input = []) {
   return normalized.length ? [...new Set(normalized)] : ['deaf_or_hard_of_hearing', 'blind_or_low_vision'];
 }
 
-async function buildCaptionTranslations(captions, outputLanguages) {
+async function buildCaptionTranslations(captions, outputLanguages, onLanguage = () => {}) {
   const map = {};
   await Promise.all(
     outputLanguages.map(async (language) => {
       map[language] = await Promise.all(
-        captions.map(async (segment) => ({
-          ...segment,
-          text: await translationProvider.translate(segment.text, language)
-        }))
+        captions.map(async (segment) => {
+          const result = await translationProvider.translateCaption(segment.text, language);
+          return {
+            ...segment, text: result.text, translation_status: result.status,
+            language: result.status === 'unavailable' || result.status === 'original' ? 'en-US' : language,
+            target_language: language
+          };
+        })
       );
+      onLanguage(language, map[language]);
     })
   );
   return map;
+}
+
+function captionSettings(stream, viewer, language) {
+  const availableLanguages = stream.output_languages || ['en-US'];
+  const fallback = availableLanguages.includes('en-US') ? 'en-US' : availableLanguages[0] || 'en-US';
+  const preferred = availableLanguages.includes(viewer?.caption_language) ? viewer.caption_language : fallback;
+  return {
+    targetLanguage: availableLanguages.includes(language) ? language : preferred,
+    captionStyle: SUPPORTED_CAPTION_STYLES.includes(viewer?.caption_style) ? viewer.caption_style : 'standard',
+    availableLanguages
+  };
+}
+
+function originalCaption(segment, stream, targetLanguage) {
+  return {
+    ...segment, language: stream.language, target_language: targetLanguage,
+    translation_status: targetLanguage === stream.language ? 'original' : 'pending'
+  };
+}
+
+async function translateAndPublish(stream, outputs, captions) {
+  await buildCaptionTranslations(captions, stream.output_languages, (language, segments) => {
+    if (store.streamOutputs.get(stream.id) !== outputs) return;
+    const byId = new Map((outputs.captionTranslations[language] || []).map(segment => [segment.id, segment]));
+    segments.forEach(segment => byId.set(segment.id, segment));
+    // Preserve source order even if concurrent translation requests finish out of order.
+    outputs.captionTranslations[language] = outputs.captions.map(segment => byId.get(segment.id)).filter(Boolean);
+    if (stream.status !== 'running' || language === stream.language) return;
+    segments.forEach(segment => streamEmitter.emit(`stream:${stream.id}`, {
+      type: 'caption.translation', stream_id: stream.id, segment_id: segment.id,
+      target_language: language, segment
+    }));
+  });
 }
 
 function normalizeSignPresentationMode(value) {
@@ -371,12 +409,6 @@ export const streamingService = {
       timeout_ms: input.model_timeout_ms
     };
 
-    const generated = await runPipeline({
-      stream,
-      timeline,
-      providerConfig
-    });
-
     const outputs = store.streamOutputs.get(id);
     stream.output_languages = normalizeOutputLanguages(input.output_languages || stream.output_languages);
     stream.sign_languages = normalizeSignLanguages(input.sign_languages || stream.sign_languages);
@@ -385,12 +417,14 @@ export const streamingService = {
       input.sign_presentation_mode || stream.sign_presentation_mode
     );
     stream.accessibility_profiles = normalizeProfiles(input.accessibility_profiles || stream.accessibility_profiles);
+    const generated = await runPipeline({ stream, timeline, providerConfig });
     outputs.events = generated.events;
     outputs.captions = generated.captions;
-    outputs.captionTranslations = await buildCaptionTranslations(outputs.captions, stream.output_languages);
+    outputs.captionTranslations = {};
     outputs.audioDescription = generated.audioDescription;
     outputs.signScript = generated.signScript;
     outputs.signCards = buildSignCards(outputs.signScript);
+    await translateAndPublish(stream, outputs, outputs.captions);
 
     outputs.events.forEach((event) => {
       if (event.confidence >= runtimeConfig().lowConfidenceThreshold) return;
@@ -471,6 +505,7 @@ export const streamingService = {
     const accessibility = await provider.inferAccessibility({ timelineItem, perception, stream });
     const sign = await provider.inferSignScript({ accessibility, timelineItem, stream });
 
+    if (stream.status !== 'running') throw new Error('Stream stopped while processing chunk');
     outputs.events.push(accessibility);
     const captionSegment = toCaptionSegment(accessibility);
     const audioSegment = toAudioDescriptionSegment(accessibility);
@@ -478,12 +513,6 @@ export const streamingService = {
     outputs.audioDescription.push(audioSegment);
     outputs.signScript.push(sign);
     outputs.signCards = buildSignCards(outputs.signScript);
-
-    const newTranslations = await buildCaptionTranslations([captionSegment], stream.output_languages);
-    for (const lang of stream.output_languages) {
-      if (!outputs.captionTranslations[lang]) outputs.captionTranslations[lang] = [];
-      outputs.captionTranslations[lang].push(...(newTranslations[lang] || []));
-    }
 
     if (accessibility.confidence < runtimeConfig().lowConfidenceThreshold) {
       const incidentId = store.nextId('incident');
@@ -510,6 +539,8 @@ export const streamingService = {
       sign
     });
 
+    await translateAndPublish(stream, outputs, [captionSegment]);
+
     store.log('stream.chunk.ingested', {
       streamId: id,
       segmentId: accessibility.segment_id,
@@ -530,23 +561,28 @@ export const streamingService = {
     return store.streamOutputs.get(id)?.events || [];
   },
 
+  getLiveEvent(id, data, options = {}) {
+    const stream = assertStream(id);
+    const viewer = resolveViewerPreferences(id, options.viewer_id);
+    const { targetLanguage, captionStyle } = captionSettings(stream, viewer, options.language);
+    if (!['segment', 'caption.translation'].includes(data.type)) return { ...data };
+    if (data.type === 'caption.translation' && data.target_language !== targetLanguage) return null;
+    const caption = data.type === 'segment' ? originalCaption(data.segment, stream, targetLanguage) : data.segment;
+    const event = {
+      ...data, viewer_id: options.viewer_id || null,
+      segment: personalizeCaptions([caption], captionStyle)[0]
+    };
+    if (data.audio_description) event.audio_description = personalizeAudioSegments([data.audio_description], viewer?.audio_description_style)[0];
+    return event;
+  },
+
   getCaptions(id, format = 'vtt', language = null, options = {}) {
     const stream = assertStream(id);
     const viewer = resolveViewerPreferences(id, options.viewer_id);
     const outputs = store.streamOutputs.get(id) || { captions: [], captionTranslations: {} };
-    const availableLanguages = stream.output_languages || ['en-US'];
-    const fallbackLanguage = availableLanguages.includes('en-US')
-      ? 'en-US'
-      : availableLanguages[0] || 'en-US';
-    const preferredLanguage = availableLanguages.includes(viewer?.caption_language)
-      ? viewer.caption_language
-      : fallbackLanguage;
-    const hasRequestedLanguage = SUPPORTED_OUTPUT_LANGUAGES.includes(language) && availableLanguages.includes(language);
-    const targetLanguage = hasRequestedLanguage ? language : preferredLanguage;
-    const selectedCaptions = outputs.captionTranslations[targetLanguage] || outputs.captions;
-    const captionStyle = SUPPORTED_CAPTION_STYLES.includes(viewer?.caption_style)
-      ? viewer.caption_style
-      : 'standard';
+    const { targetLanguage, captionStyle, availableLanguages } = captionSettings(stream, viewer, language);
+    const translations = new Map((outputs.captionTranslations[targetLanguage] || []).map(segment => [segment.id, segment]));
+    const selectedCaptions = outputs.captions.map(segment => translations.get(segment.id) || originalCaption(segment, stream, targetLanguage));
     const personalizedCaptions = personalizeCaptions(selectedCaptions, captionStyle);
     const normalized = String(format || 'vtt').toLowerCase();
 

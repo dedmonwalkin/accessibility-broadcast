@@ -231,6 +231,11 @@ async function route(req, res) {
 
     const streamSse = extractParams(pathname, '/v1/streams/:id/events/stream');
     if (method === 'GET' && streamSse) {
+      const options = { viewer_id: url.searchParams.get('viewer_id'), language: url.searchParams.get('language') };
+      // Validate the stream/profile before committing event-stream headers.
+      const captions = streamingService.getCaptions(streamSse.id, 'vtt', options.language, options);
+      const audio = streamingService.getAudioDescription(streamSse.id, options);
+      const sign = streamingService.getSignOverlay(streamSse.id, options);
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
@@ -245,13 +250,21 @@ async function route(req, res) {
       }, runtime.sseIdleTimeoutMs);
 
       function onEvent(data) {
-        incrementSseEvents();
-        idleTimeout.refresh();
-        res.write(`data: ${JSON.stringify(data)}\n\n`);
+        try {
+          const event = streamingService.getLiveEvent(streamSse.id, data, options);
+          if (!event) return;
+          incrementSseEvents();
+          idleTimeout.refresh();
+          res.write(`data: ${JSON.stringify(event)}\n\n`);
+        } catch { res.end(); }
       }
 
       const eventKey = `stream:${streamSse.id}`;
       streamEmitter.on(eventKey, onEvent);
+      res.write(`data: ${JSON.stringify({
+        type: 'snapshot', stream_id: streamSse.id, captions: captions.captions,
+        audio_description: audio.segments, sign: sign.segments
+      })}\n\n`);
       req.on('close', () => {
         clearTimeout(idleTimeout);
         decrementSse();
