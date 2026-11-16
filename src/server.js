@@ -648,13 +648,13 @@ function reportModelProviderConfig() {
     // eslint-disable-next-line no-console
     console.warn(JSON.stringify({ ts: new Date().toISOString(), level: 'warn', message }));
   };
-  if (configured === 'http') {
-    try {
-      createModelProvider({ provider: 'http' });
-    } catch (error) {
-      warn(`Model provider is misconfigured: ${error.message}. Streams that use it will fail with ${error.code} until this is fixed.`);
-    }
-  } else if (process.env.NODE_ENV === 'production') {
+  try {
+    createModelProvider({ provider: configured });
+  } catch (error) {
+    warn(`Model provider is misconfigured: ${error.message}. Streams that use it will fail with ${error.code} until this is fixed.`);
+    return;
+  }
+  if (configured === 'mock' && process.env.NODE_ENV === 'production') {
     warn('MODEL_PROVIDER is mock: caption, audio description and sign output is canned demo text, not real transcription.');
   }
 }

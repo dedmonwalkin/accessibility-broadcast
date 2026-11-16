@@ -54,7 +54,8 @@ returns an unusable body fails the request with HTTP 502
 gateway URL fails it with HTTP 503 `model_provider_misconfigured`. Mock output
 is never substituted, so nothing is published for that chunk. All four model
 calls for a chunk must succeed; a chunk is not published with some outputs
-missing. A stream cannot be started while its gateway is failing.
+missing. A start request that sends its own `mock_timeline` fails the same way
+and leaves the stream unstarted.
 
 The first failure on a running stream opens one high-severity
 `model_provider_error` incident (later failures update its `failed_requests`
@@ -63,8 +64,22 @@ health response and sends `captions.interrupted` to viewers. The viewer page and
 embed show that captions are interrupted until the next caption arrives, so a
 gap is not mistaken for silence.
 
-The `mock` provider is unchanged: it is the default, it returns canned demo
-text, and its output is not labelled in the viewer.
+## Demo content
+
+Starting a stream on the `mock` provider publishes a three-segment demo
+timeline. A stream on `http` never gets it: it starts with no captions, audio
+description or sign output, makes no gateway call at start, and reports
+`model_provider_status: unknown` until its first chunk has been processed. A
+`mock_timeline` sent with the start request is always processed, by whichever
+provider the stream uses.
+
+A provider name the server does not support is refused: HTTP 400
+`unsupported_model_provider` when it is sent in a request, HTTP 503
+`model_provider_misconfigured` (`reason: unknown_provider`) when it comes from
+`MODEL_PROVIDER`. It is never treated as `mock`.
+
+The `mock` provider is the default. It returns canned demo text, and its output
+is not labelled in the viewer.
 
 ## Viewer and embed
 

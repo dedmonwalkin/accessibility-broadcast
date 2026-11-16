@@ -192,11 +192,15 @@ test('a later outage on the same stream opens a new incident', async () => {
   assert.equal(incidentsFor(stream.id).length, 2);
 });
 
-test('a stream cannot start while the gateway is down and is not left running', async () => {
+test('a start that sends a timeline fails while the gateway is down and the stream is not left running', async () => {
   gateway.mode = 'down';
   const stream = streamingService.createStream({ name: 'Never started', model_provider: 'http' });
   await assert.rejects(
-    () => streamingService.startStream(stream.id, { protocol: 'rtmp', source_url: 'rtmp://fixture/live' }),
+    () => streamingService.startStream(stream.id, {
+      protocol: 'rtmp',
+      source_url: 'rtmp://fixture/live',
+      mock_timeline: [{ transcript: 'Opening remarks.', scene: 'Chamber', speaker: 'chair', entities: [] }]
+    }),
     { code: 'model_provider_unavailable' }
   );
   const health = streamingService.getHealth(stream.id);
@@ -251,5 +255,89 @@ test('a misconfigured gateway is a 503 the operator can act on', async () => {
     assert.equal(body.reason, 'missing_base_url');
   } finally {
     process.env.MODEL_HTTP_BASE_URL = saved;
+  }
+});
+
+const DEMO_CAPTION = /championship game|home team|midfield/i;
+
+test('a stream on the real provider starts empty: no demo captions and no gateway calls', async () => {
+  gateway.mode = 'up';
+  gateway.calls.length = 0;
+  const stream = streamingService.createStream({ name: 'City council meeting', model_provider: 'http' });
+  const started = await streamingService.startStream(stream.id, { protocol: 'rtmp', source_url: 'rtmp://fixture/live' });
+
+  assert.equal(started.stream.status, 'running');
+  assert.equal(started.generated.provider, 'http');
+  assert.deepEqual(
+    { events: started.generated.events, captions: started.generated.captions, audio: started.generated.audioDescription, sign: started.generated.signScript },
+    { events: 0, captions: 0, audio: 0, sign: 0 }
+  );
+  assert.deepEqual(streamingService.getCaptions(stream.id).captions, []);
+  assert.deepEqual(streamingService.getAudioDescription(stream.id).segments, []);
+  assert.deepEqual(streamingService.getSignOverlay(stream.id).segments, []);
+  assert.deepEqual(gateway.calls, [], 'nothing was sent to the gateway');
+  assert.equal(streamingService.getHealth(stream.id).model_provider_status, 'unknown', 'not reported as ok before it has been used');
+
+  await streamingService.ingestChunk(stream.id, { audio_base64: 'AAAA' });
+  const texts = streamingService.getCaptions(stream.id).captions.map(caption => caption.text);
+  assert.deepEqual(texts, [GATEWAY_TRANSCRIPT], 'the first caption is the first real one');
+  assert.ok(texts.every(text => !DEMO_CAPTION.test(text)));
+  assert.equal(streamingService.getHealth(stream.id).model_provider_status, 'ok');
+});
+
+test('a real-provider stream can start while the gateway is down, and the first chunk reports it', async () => {
+  gateway.mode = 'down';
+  const stream = streamingService.createStream({ name: 'Starts anyway', model_provider: 'http' });
+  const started = await streamingService.startStream(stream.id, { protocol: 'rtmp', source_url: 'rtmp://fixture/live' });
+  assert.equal(started.stream.status, 'running');
+  await assert.rejects(() => streamingService.ingestChunk(stream.id, {}), { code: 'model_provider_unavailable' });
+  assert.equal(streamingService.getHealth(stream.id).model_provider_status, 'interrupted');
+  assert.equal(incidentsFor(stream.id).length, 1);
+});
+
+test('the demo timeline is still what a mock-provider stream starts with', async () => {
+  const stream = streamingService.createStream({ name: 'Demo', model_provider: 'mock' });
+  const started = await streamingService.startStream(stream.id, { protocol: 'rtmp', source_url: 'rtmp://fixture/live' });
+  assert.equal(started.generated.provider, 'mock');
+  assert.equal(started.generated.captions, 3);
+  assert.ok(streamingService.getCaptions(stream.id).captions.every(caption => DEMO_CAPTION.test(caption.text)));
+});
+
+test('an unrecognised provider name is refused instead of being treated as mock', async () => {
+  assert.throws(() => streamingService.createStream({ name: 'Typo', model_provider: 'whisper' }), (error) => {
+    assert.equal(error.code, 'unsupported_model_provider');
+    assert.equal(error.statusCode, 400);
+    assert.deepEqual(error.details, { supported: ['mock', 'http'] });
+    return true;
+  });
+
+  const stream = streamingService.createStream({ name: 'Override', model_provider: 'http' });
+  await assert.rejects(
+    () => streamingService.startStream(stream.id, { protocol: 'rtmp', source_url: 'rtmp://fixture/live', model_provider: 'whisper' }),
+    { code: 'unsupported_model_provider' }
+  );
+  assert.notEqual(streamingService.getHealth(stream.id).status, 'running');
+
+  const response = await fetch(`${base}/v1/streams`, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer fixture-key', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'Typo over HTTP', model_provider: 'whisper' })
+  });
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { supported: ['mock', 'http'], error: 'unsupported_model_provider' });
+});
+
+test('an unrecognised MODEL_PROVIDER on the server is a 503, not a mock stream', () => {
+  const saved = process.env.MODEL_PROVIDER;
+  process.env.MODEL_PROVIDER = 'whisper';
+  try {
+    assert.throws(() => streamingService.createStream({ name: 'Env typo' }), (error) => {
+      assert.equal(error.code, 'model_provider_misconfigured');
+      assert.equal(error.statusCode, 503);
+      assert.deepEqual(error.details, { reason: 'unknown_provider' });
+      return true;
+    });
+  } finally {
+    if (saved === undefined) delete process.env.MODEL_PROVIDER; else process.env.MODEL_PROVIDER = saved;
   }
 });

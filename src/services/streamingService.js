@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { store } from '../data/store.js';
 import { assertRequired } from '../utils/validation.js';
 import { clientError, isModelProviderError } from '../utils/errors.js';
-import { createModelProvider } from './providers/modelProvider.js';
+import { createModelProvider, resolveModelProviderName } from './providers/modelProvider.js';
 import { createTranslationProvider } from './providers/translationProvider.js';
 import { runtimeConfig } from '../config/runtime.js';
 
@@ -54,6 +54,8 @@ function asTimelineItem(item, index, anchorMs) {
   };
 }
 
+// Canned demo content. It is only ever used for streams on the mock provider;
+// a stream on a real provider shows nothing until real audio has been processed.
 function defaultTimeline(anchorMs) {
   return [
     asTimelineItem(
@@ -404,6 +406,7 @@ async function runPipeline({ stream, timeline, providerConfig }) {
 export const streamingService = {
   createStream(input = {}) {
     assertRequired(input, ['name']);
+    const modelProvider = resolveModelProviderName(input.model_provider);
 
     const id = store.nextId('stream');
     const now = store.nowIso();
@@ -419,7 +422,7 @@ export const streamingService = {
       target_latency_seconds: input.target_latency_seconds || 7,
       status: 'created',
       ingest: null,
-      model_provider: String(input.model_provider || process.env.MODEL_PROVIDER || 'mock').toLowerCase(),
+      model_provider: modelProvider,
       started_at: null,
       stopped_at: null,
       createdAt: now,
@@ -454,6 +457,10 @@ export const streamingService = {
       throw clientError('unsupported_ingest_protocol', 'Unsupported ingest protocol. Use rtmp or srt.');
     }
 
+    const startProvider = input.model_provider
+      ? resolveModelProviderName(input.model_provider)
+      : stream.model_provider;
+
     const beforeStart = { status: stream.status, started_at: stream.started_at, ingest: stream.ingest };
     stream.ingest = {
       protocol,
@@ -466,12 +473,18 @@ export const streamingService = {
     stream.updatedAt = store.nowIso();
 
     const anchorMs = new Date(stream.started_at).getTime();
-    const timeline = Array.isArray(input.mock_timeline) && input.mock_timeline.length
-      ? input.mock_timeline.map((item, index) => asTimelineItem(item, index, anchorMs))
-      : defaultTimeline(anchorMs);
+    // A timeline sent with the request is always used. Without one, only the
+    // mock provider gets the demo timeline; a real provider starts empty.
+    const hasRequestTimeline = Array.isArray(input.mock_timeline) && input.mock_timeline.length > 0;
+    let timeline = [];
+    if (hasRequestTimeline) {
+      timeline = input.mock_timeline.map((item, index) => asTimelineItem(item, index, anchorMs));
+    } else if (startProvider === 'mock') {
+      timeline = defaultTimeline(anchorMs);
+    }
 
     const providerConfig = {
-      provider: input.model_provider || stream.model_provider,
+      provider: startProvider,
       base_url: input.model_base_url,
       api_key: input.model_api_key,
       timeout_ms: input.model_timeout_ms
@@ -496,7 +509,8 @@ export const streamingService = {
       if (isModelProviderError(error)) recordModelProviderFailure(stream, error);
       throw error;
     }
-    recordModelProviderSuccess(stream);
+    // With nothing to process the provider was not called, so its status stays as it was.
+    if (timeline.length) recordModelProviderSuccess(stream);
     outputs.events = generated.events;
     outputs.captions = generated.captions;
     outputs.captionTranslations = {};

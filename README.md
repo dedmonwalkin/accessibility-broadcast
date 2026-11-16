@@ -47,6 +47,10 @@ curl -X POST http://localhost:3000/v1/streams/<STREAM_ID>/start \
   -d '{"protocol":"rtmp","source_url":"rtmp://encoder.local/live/main"}'
 ```
 
+With the default `mock` provider, starting a stream publishes three demo
+segments so there is something to look at. With `MODEL_PROVIDER=http` a stream
+starts empty and shows only what the gateway produces from real audio.
+
 ```bash
 curl -X POST http://localhost:3000/v1/viewers \
   -H 'content-type: application/json' \
