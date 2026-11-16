@@ -51,6 +51,7 @@ test('real SSE personalizes delivery and reconnect snapshots while API key auth 
   const read = await connect(t, path);
   const snapshot = await read();
   assert.equal(snapshot.type, 'snapshot');
+  assert.equal(snapshot.sign_theme.id, 'standard', 'snapshot carries the viewer sign theme');
   assert.ok(snapshot.captions.every(caption => caption.translation_status === 'mock'));
   const ingest = await streamingService.ingestChunk(stream.id);
   const original = await read();
