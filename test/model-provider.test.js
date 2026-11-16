@@ -19,12 +19,12 @@ const { startServer } = await import('../src/server.js');
 // Stands in for the gateway. Requests to anything else go to the real fetch,
 // so the tests can still call this server over HTTP.
 const realFetch = globalThis.fetch;
-const gateway = { mode: 'up', calls: [] };
+const gateway = { mode: 'up', calls: [], demo: false };
 const GATEWAY_TRANSCRIPT = 'The clerk reads item four of the agenda.';
 
 function gatewayResponse(path, body) {
   if (path === '/v1/models/transcribe') {
-    return { transcript: GATEWAY_TRANSCRIPT, scene: 'Council chamber', language: 'en', confidence: 0.93 };
+    return { transcript: GATEWAY_TRANSCRIPT, scene: 'Council chamber', language: 'en', confidence: 0.93, ...(gateway.demo ? { demo: true } : {}) };
   }
   if (path === '/v1/models/perception') {
     const item = body.timelineItem;
@@ -340,4 +340,87 @@ test('an unrecognised MODEL_PROVIDER on the server is a 503, not a mock stream',
   } finally {
     if (saved === undefined) delete process.env.MODEL_PROVIDER; else process.env.MODEL_PROVIDER = saved;
   }
+});
+
+async function readSnapshot(t, streamId) {
+  const controller = new AbortController();
+  t.after(() => controller.abort());
+  const sse = await fetch(`${base}/v1/streams/${streamId}/events/stream`, { signal: controller.signal });
+  assert.equal(sse.status, 200);
+  const reader = sse.body.getReader();
+  const decoder = new TextDecoder();
+  let text = '';
+  while (!text.includes('"type":"snapshot"') || !text.endsWith('\n\n')) {
+    const chunk = await reader.read();
+    assert.equal(chunk.done, false);
+    text += decoder.decode(chunk.value, { stream: true });
+  }
+  return JSON.parse(text.split('\n').find(line => line.startsWith('data: ')).slice(6));
+}
+
+test('a mock-provider stream is marked as demo everywhere a viewer or client can read it', { timeout: 5000 }, async (t) => {
+  const stream = streamingService.createStream({ name: 'Demo flags', model_provider: 'mock' });
+  assert.equal(streamingService.getHealth(stream.id).demo, true, 'even before it has any output');
+
+  const events = [];
+  const onEvent = (event) => events.push(event);
+  streamEmitter.on(`stream:${stream.id}`, onEvent);
+  t.after(() => streamEmitter.off(`stream:${stream.id}`, onEvent));
+
+  await streamingService.startStream(stream.id, { protocol: 'rtmp', source_url: 'rtmp://fixture/live' });
+  const chunk = await streamingService.ingestChunk(stream.id, {});
+
+  assert.equal(chunk.demo, true);
+  const segments = events.filter(event => event.type === 'segment');
+  assert.equal(segments.length, 4);
+  assert.ok(segments.every(event => event.demo === true));
+  assert.equal(streamingService.getCaptions(stream.id).demo, true);
+  assert.equal(streamingService.getCaptions(stream.id, 'ttml').demo, true);
+  assert.equal(streamingService.getAudioDescription(stream.id).demo, true);
+  assert.equal(streamingService.getSignOverlay(stream.id).demo, true);
+  assert.equal((await readSnapshot(t, stream.id)).demo, true);
+});
+
+test('a real-provider stream fed by a real gateway is not marked as demo', { timeout: 5000 }, async (t) => {
+  gateway.mode = 'up';
+  const stream = streamingService.createStream({ name: 'Real', model_provider: 'http' });
+  await streamingService.startStream(stream.id, { protocol: 'rtmp', source_url: 'rtmp://fixture/live' });
+  const chunk = await streamingService.ingestChunk(stream.id, { audio_base64: 'AAAA' });
+
+  assert.equal(chunk.demo, false);
+  assert.equal(streamingService.getHealth(stream.id).demo, false);
+  assert.equal(streamingService.getCaptions(stream.id).demo, false);
+  assert.equal((await readSnapshot(t, stream.id)).demo, false);
+});
+
+test('a gateway that says its answer is demo text marks the stream as demo', async () => {
+  gateway.mode = 'up';
+  const stream = streamingService.createStream({ name: 'Stub gateway', model_provider: 'http' });
+  await streamingService.startStream(stream.id, { protocol: 'rtmp', source_url: 'rtmp://fixture/live' });
+  gateway.demo = true;
+  try {
+    const chunk = await streamingService.ingestChunk(stream.id, { audio_base64: 'AAAA' });
+    assert.equal(chunk.demo, true);
+    assert.equal(streamingService.getHealth(stream.id).demo, true);
+  } finally {
+    gateway.demo = false;
+  }
+});
+
+test('a scripted start timeline on the real provider marks the stream as demo', async () => {
+  const stream = await startedHttpStream('Scripted start');
+  assert.equal(streamingService.getHealth(stream.id).demo, true);
+});
+
+test('the example gateway declares its transcripts as demo text', async (t) => {
+  const { createModelGatewayServer } = await import('../examples/model-gateway/server.js');
+  const stub = createModelGatewayServer();
+  await new Promise(resolve => stub.listen(0, resolve));
+  t.after(() => new Promise(resolve => stub.close(resolve)));
+  const response = await realFetch(`http://127.0.0.1:${stub.address().port}/v1/models/transcribe`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ audio_base64: 'AAAA' })
+  });
+  assert.equal((await response.json()).demo, true);
 });

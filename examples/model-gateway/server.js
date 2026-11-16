@@ -126,6 +126,9 @@ export function createModelGatewayServer() {
         return sendJson(res, 200, {
           transcript,
           scene: 'Gateway stub: visual scene unavailable',
+          // This stub does not transcribe the audio it is sent. Saying so lets
+          // the server tell viewers they are looking at demo text.
+          demo: true,
           language,
           duration_ms: durationMs,
           confidence: Number((0.78 + transcriptScore * 0.18).toFixed(2))
