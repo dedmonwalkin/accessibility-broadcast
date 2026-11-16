@@ -279,13 +279,21 @@ export const streamingUiService = {
       var audioLines = createBuffer();
       var signIds = new Set();
       var allThemes = [];
+      var currentThemeId = '';
+      var themeChosenHere = false;
+      var gotSnapshot = false;
+      var streamEnded = false;
       var sizeMap = { small: '280px', medium: '360px', large: '480px' };
       var errorRegion = document.getElementById('error-region');
       var connStatus = document.getElementById('conn-status');
 
-      function showError(msg) {
+      function showError(msg, canRetry) {
         errorRegion.innerHTML = '<div class="error-banner">' + msg +
-          '<br><button onclick="location.reload()">Reload page</button></div>';
+          (canRetry ? '<br><button onclick="location.reload()">Reload page</button>' : '') + '</div>';
+      }
+
+      function clearError() {
+        errorRegion.innerHTML = '';
       }
 
       function applyTheme(theme) {
@@ -359,15 +367,37 @@ export const streamingUiService = {
             if (theme.accessibility_notes) opt.title = theme.accessibility_notes;
             select.appendChild(opt);
           });
+          // The saved theme can arrive before the option list does.
+          if (currentThemeId) select.value = currentThemeId;
         } catch (_) {}
       }
 
-      async function initialLoad() {
+      function useTheme(theme) {
+        if (!theme) return;
+        applyTheme(theme);
+        currentThemeId = theme.id;
+        document.getElementById('themeSelect').value = theme.id;
+      }
+
+      function fetchJson(path, label) {
+        return fetch(path).then(function (r) {
+          if (!r.ok) {
+            var failure = new Error('Failed to load ' + label);
+            failure.status = r.status;
+            throw failure;
+          }
+          return r.json();
+        });
+      }
+
+      // The event stream's first frame carries everything the page shows, so
+      // these requests are only made when that stream cannot be opened at all.
+      async function loadSnapshotOverHttp() {
         try {
           var results = await Promise.all([
-            fetch('/v1/streams/' + streamId + '/captions' + viewerQuery).then(function (r) { if (!r.ok) throw new Error('Failed to load captions'); return r.json(); }),
-            fetch('/v1/streams/' + streamId + '/sign-overlay' + viewerQuery).then(function (r) { if (!r.ok) throw new Error('Failed to load sign overlay'); return r.json(); }),
-            fetch('/v1/streams/' + streamId + '/audio-description' + viewerQuery).then(function (r) { if (!r.ok) throw new Error('Failed to load audio description'); return r.json(); })
+            fetchJson('/v1/streams/' + streamId + '/captions' + viewerQuery, 'captions'),
+            fetchJson('/v1/streams/' + streamId + '/sign-overlay' + viewerQuery, 'sign overlay'),
+            fetchJson('/v1/streams/' + streamId + '/audio-description' + viewerQuery, 'audio description')
           ]);
           var captions = results[0];
           var signOverlay = results[1];
@@ -376,26 +406,29 @@ export const streamingUiService = {
           captions.captions.forEach(function (s) { captionLines.upsert(s); });
           audio.segments.forEach(function (s) { audioLines.upsert(s); });
           renderCaptionsAndAudio();
-
-          if (signOverlay.theme) {
-            applyTheme(signOverlay.theme);
-            document.getElementById('themeSelect').value = signOverlay.theme.id;
-          }
-          if (signOverlay.segments && signOverlay.segments.length) {
-            clearSignEmpty();
-            var container = document.getElementById('signSegments');
-            signOverlay.segments.forEach(function (s) {
-              addSign(s);
-            });
-          }
+          useTheme(signOverlay.theme);
+          (signOverlay.segments || []).forEach(addSign);
+          connStatus.textContent = 'Live updates unavailable. Reload the page to refresh.';
         } catch (err) {
-          showError('Could not load stream data: ' + err.message);
+          connStatus.textContent = 'Unavailable';
+          document.getElementById('captions').textContent = 'Captions are unavailable.';
+          document.getElementById('audio').textContent = 'Audio descriptions are unavailable.';
+          var signEmpty = document.querySelector('.sign-empty');
+          if (signEmpty) signEmpty.textContent = 'Sign language output is unavailable.';
+          if (err.status === 401 || err.status === 403) {
+            showError('This stream is not open for public viewing. Ask the stream operator for access.', false);
+          } else {
+            showError('Could not load stream data: ' + err.message, true);
+          }
         }
       }
 
       document.getElementById('themeSelect').addEventListener('change', function () {
         var selected = allThemes.find(function (t) { return t.id === this.value; }.bind(this));
         if (selected) applyTheme(selected);
+        // A choice made on this page wins over the saved one on later snapshots.
+        currentThemeId = this.value;
+        themeChosenHere = true;
         if (viewerId) {
           fetch('/v1/viewers/' + viewerId + '/preferences', {
             method: 'PATCH',
@@ -422,27 +455,40 @@ export const streamingUiService = {
             captionLines.upsert(data.segment);
             renderCaptionsAndAudio();
           } else if (data.type === 'snapshot') {
+            gotSnapshot = true;
+            clearError();
+            connStatus.textContent = 'Live';
             data.captions.forEach(function (s) { captionLines.upsert(s); });
             data.audio_description.forEach(function (s) { audioLines.upsert(s); });
             (data.sign || []).forEach(addSign);
+            if (!themeChosenHere) useTheme(data.sign_theme);
             renderCaptionsAndAudio();
           } else if (data.type === 'stream.stopped') {
             document.getElementById('captions').textContent += '\\n[stream stopped]';
             connStatus.textContent = 'Stream ended';
+            streamEnded = true;
             sse.close();
           }
         } catch (_) {}
       };
       sse.onerror = function () {
-        connStatus.textContent = 'Disconnected — using snapshot';
-        if (!captionLines.values().length) {
-          document.getElementById('captions').textContent = 'SSE connection error. Falling back to snapshot.';
-          initialLoad();
-          sse.close();
+        if (streamEnded) return;
+        // After a first snapshot the browser reconnects by itself, and the next
+        // snapshot fills in anything missed.
+        if (gotSnapshot && sse.readyState !== EventSource.CLOSED) {
+          connStatus.textContent = 'Reconnecting...';
+          return;
         }
+        sse.close();
+        if (gotSnapshot) {
+          connStatus.textContent = 'Disconnected. Reload the page to reconnect.';
+          return;
+        }
+        // The event stream never opened: try the one-off HTTP snapshot instead.
+        loadSnapshotOverHttp();
       };
 
-      loadThemes().then(function () { return initialLoad(); }).catch(function () {});
+      loadThemes();
     </script>
   </body>
 </html>`;
@@ -689,6 +735,8 @@ export const streamingUiService = {
       const text = buffer.text();
       if (text) target.textContent = text;
     }
+    let gotSnapshot = false;
+    let ended = false;
     const sse = new EventSource('/v1/streams/' + streamId + '/events/stream' + suffix);
     sse.onmessage = function (e) {
       try {
@@ -697,23 +745,38 @@ export const streamingUiService = {
           buffer.upsert(data.segment);
           renderCaption();
         } else if (data.type === 'snapshot') {
+          gotSnapshot = true;
           data.captions.forEach(segment => buffer.upsert(segment));
           renderCaption();
         } else if (data.type === 'stream.stopped') {
           target.textContent = '[stream ended]';
+          ended = true;
           sse.close();
         }
       } catch (_) {}
     };
     sse.onerror = function () {
-      fetch('/v1/streams/' + streamId + '/captions' + suffix).then((r) => { if (!r.ok) throw new Error('Could not load captions'); return r.json(); }).then((payload) => {
+      if (ended) return;
+      // After a first snapshot the browser reconnects by itself; keep the
+      // caption on screen instead of replacing it with an error.
+      if (gotSnapshot && sse.readyState !== EventSource.CLOSED) return;
+      sse.close();
+      if (gotSnapshot) return;
+      // The event stream never opened: try the one-off HTTP snapshot instead.
+      fetch('/v1/streams/' + streamId + '/captions' + suffix).then((r) => {
+        if (!r.ok) {
+          throw new Error(r.status === 401 || r.status === 403
+            ? 'this stream is not open for public viewing'
+            : 'could not load captions');
+        }
+        return r.json();
+      }).then((payload) => {
         payload.captions.forEach(segment => buffer.upsert(segment));
         if (buffer.values().length) renderCaption();
         else target.textContent = 'No captions available yet.';
       }).catch((error) => {
         target.textContent = 'Overlay error: ' + error.message;
       });
-      sse.close();
     };
   }
 

@@ -83,7 +83,7 @@ paths:
   /v1/streams/{id}/events/stream:
     get:
       summary: Receive personalized live output and translation updates
-      description: Starts with a snapshot, then segment, caption.translation and stream.stopped JSON data messages. Caption updates merge by segment ID. See docs/live-caption-delivery.md.
+      description: Starts with a snapshot (captions, audio_description, sign, sign_theme), then segment, caption.translation and stream.stopped JSON data messages. Caption updates merge by segment ID. See docs/live-caption-delivery.md.
       parameters:
         - $ref: '#/components/parameters/StreamId'
         - in: query

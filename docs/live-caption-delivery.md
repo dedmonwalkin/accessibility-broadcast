@@ -26,7 +26,8 @@ creation; general source-language selection is outside this change.
 
 `GET /v1/streams/:id/events/stream?viewer_id=...&language=...` validates the stream
 and profile before sending SSE headers. It starts with a personalized `snapshot`
-containing caption, audio-description and sign arrays. When API keys are
+containing caption, audio-description and sign arrays plus the viewer's sign
+theme (`sign_theme`). When API keys are
 configured the endpoint requires one by default; set `SSE_PUBLIC_STREAMS=true`
 to let the public viewer page and embed connect, since browser `EventSource`
 cannot send an `Authorization` header. Subsequent frames are JSON data messages:
@@ -45,6 +46,12 @@ event is published to an ended stream.
 
 Both clients merge by segment ID and ignore a lower-quality original arriving
 after a completed translation. Reconnection snapshots recover missed updates.
+
+Both clients take their initial data from the event stream's snapshot. They
+request the JSON snapshot endpoints only when the event stream cannot be opened
+at all, and once a snapshot has arrived a dropped connection is left to the
+browser's own reconnect. When neither route is open without a key they say the
+stream is not open for public viewing rather than reporting a load failure.
 Caption/audio buffers keep at most 500 rows; the embed keeps the newest caption
 and ignores older translations arriving after newer segments.
 

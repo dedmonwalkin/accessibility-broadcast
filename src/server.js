@@ -368,7 +368,7 @@ async function route(req, res) {
       streamEmitter.on(eventKey, onEvent);
       res.write(`data: ${JSON.stringify({
         type: 'snapshot', stream_id: streamSse.id, captions: captions.captions,
-        audio_description: audio.segments, sign: sign.segments
+        audio_description: audio.segments, sign: sign.segments, sign_theme: sign.theme
       })}\n\n`);
       let closed = false;
       const cleanup = () => {

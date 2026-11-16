@@ -105,7 +105,7 @@ test('viewer page has error handling in initialLoad', () => {
 
 test('viewer page checks response.ok on fetches', () => {
   const html = streamingUiService.buildViewerPage('s1');
-  assert.ok(html.includes('if (!r.ok) throw'), 'should check response status');
+  assert.ok(html.includes('if (!r.ok)'), 'should check response status');
 });
 
 // ── Viewer page CSS ─────────────────────────────────────────────
