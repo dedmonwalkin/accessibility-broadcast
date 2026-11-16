@@ -41,7 +41,9 @@ paths:
               $ref: '#/components/schemas/StartStreamRequest'
       responses:
         '502':
-          description: The model gateway failed (error model_provider_unavailable, with the failing operation). The stream is not started and no output is produced.
+          description: A mock_timeline was sent and the model gateway failed while processing it (error model_provider_unavailable, with the failing operation). The stream is not started and no output is produced.
+        '400':
+          description: Invalid request, for example an unsupported protocol or model_provider (error unsupported_model_provider, with the supported names).
         '503':
           description: The model gateway is not configured correctly (error model_provider_misconfigured, with a reason).
         '200':
@@ -459,6 +461,7 @@ components:
             type: string
         mock_timeline:
           type: array
+          description: Scripted segments to process at start. If omitted, a stream on the mock provider gets a three-segment demo timeline and a stream on any other provider starts with no output.
           items:
             type: object
     StartStreamResponse:
