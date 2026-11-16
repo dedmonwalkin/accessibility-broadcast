@@ -269,3 +269,50 @@ test('embed replaces a stale caption with an interruption notice until captions 
   sse.deliver({ type: 'segment', stream_id: 'stream-1', segment: NEXT_CAPTION });
   assert.match(caption.textContent, /Item four is approved\./);
 });
+
+const DEMO_TEXT = /Demo content\..*not a live transcription/;
+
+test('viewer shows no demo notice for a stream without demo content', async () => {
+  const browser = makeBrowser({ streamStatus: 401 });
+  const sse = runViewer(browser);
+  await browser.settle();
+  sse.deliver({ ...SNAPSHOT, demo: false });
+  sse.deliver({ type: 'segment', stream_id: 'stream-1', segment: NEXT_CAPTION, audio_description: AUDIO, demo: false });
+
+  assert.equal(browser.el('demo-region').innerHTML, '');
+});
+
+test('viewer labels a demo stream as soon as it connects', async () => {
+  const browser = makeBrowser({ streamStatus: 401 });
+  const sse = runViewer(browser);
+  await browser.settle();
+  sse.deliver({ ...SNAPSHOT, demo: true });
+
+  assert.match(browser.el('demo-region').innerHTML, DEMO_TEXT);
+  assert.equal(browser.el('error-region').innerHTML, '', 'a demo is not an error');
+});
+
+test('viewer adds the demo notice when demo content arrives after it connected', async () => {
+  const browser = makeBrowser({ streamStatus: 401 });
+  const sse = runViewer(browser);
+  await browser.settle();
+  sse.deliver({ ...SNAPSHOT, demo: false });
+  assert.equal(browser.el('demo-region').innerHTML, '');
+  sse.deliver({ type: 'segment', stream_id: 'stream-1', segment: NEXT_CAPTION, audio_description: AUDIO, demo: true });
+
+  assert.match(browser.el('demo-region').innerHTML, DEMO_TEXT);
+});
+
+test('embed shows its demo label only for demo content', async () => {
+  const real = makeBrowser({ streamStatus: 401 });
+  const realEmbed = runEmbed(real);
+  realEmbed.sse.deliver({ ...SNAPSHOT, demo: false });
+  const realPanel = real.document.body.appended[0];
+  assert.notEqual(realPanel.querySelector('#a11y-overlay-demo').hidden, false);
+
+  const demo = makeBrowser({ streamStatus: 401 });
+  const demoEmbed = runEmbed(demo);
+  demoEmbed.sse.deliver({ ...SNAPSHOT, demo: true });
+  const demoPanel = demo.document.body.appended[0];
+  assert.equal(demoPanel.querySelector('#a11y-overlay-demo').hidden, false);
+});

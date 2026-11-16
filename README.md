@@ -48,8 +48,9 @@ curl -X POST http://localhost:3000/v1/streams/<STREAM_ID>/start \
 ```
 
 With the default `mock` provider, starting a stream publishes three demo
-segments so there is something to look at. With `MODEL_PROVIDER=http` a stream
-starts empty and shows only what the gateway produces from real audio.
+segments so there is something to look at, and the viewer page labels the
+stream as demo content. With `MODEL_PROVIDER=http` a stream starts empty and
+shows only what the gateway produces.
 
 ```bash
 curl -X POST http://localhost:3000/v1/viewers \
@@ -89,6 +90,10 @@ Set:
 export MODEL_PROVIDER=http
 export MODEL_HTTP_BASE_URL=http://localhost:4011
 ```
+
+The included stub does not transcribe: it answers with a random sample phrase
+and marks it `demo: true`, so the viewer labels those streams as demo content
+too. Real captions need a gateway that performs speech-to-text.
 
 If the gateway is unreachable or misconfigured, requests fail with a typed
 error (`model_provider_unavailable` or `model_provider_misconfigured`) and no

@@ -370,7 +370,8 @@ async function route(req, res) {
       res.write(`data: ${JSON.stringify({
         type: 'snapshot', stream_id: streamSse.id, captions: captions.captions,
         audio_description: audio.segments, sign: sign.segments, sign_theme: sign.theme,
-        captions_interrupted: streamingService.isCaptioningInterrupted(streamSse.id)
+        captions_interrupted: streamingService.isCaptioningInterrupted(streamSse.id),
+        demo: streamingService.isDemoStream(streamSse.id)
       })}\n\n`);
       let closed = false;
       const cleanup = () => {

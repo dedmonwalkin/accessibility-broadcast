@@ -78,8 +78,27 @@ A provider name the server does not support is refused: HTTP 400
 `model_provider_misconfigured` (`reason: unknown_provider`) when it comes from
 `MODEL_PROVIDER`. It is never treated as `mock`.
 
-The `mock` provider is the default. It returns canned demo text, and its output
-is not labelled in the viewer.
+### Labelling
+
+Demo content is anything that was not produced from the stream's own audio. A
+stream is marked as demo when any of these is true:
+
+- it uses the `mock` provider (the default), from the moment it is created;
+- it was started with a timeline, whether the built-in one or a `mock_timeline`
+  from the request;
+- its gateway answered a transcription request with `demo: true`. The example
+  gateway in `examples/model-gateway` does this, because it returns a random
+  phrase from a fixed list and does not transcribe the audio it is sent.
+
+The mark is stream-wide and is not removed once set. It appears as `demo` on the
+event stream snapshot, on each `segment` event that carries demo content, on the
+ingest response, and on the JSON captions, audio-description, sign-overlay and
+health responses. The viewer page shows a "Demo content" notice and the embed
+shows a demo label whenever it is true. VTT and TTML caption text carries no
+marker.
+
+A gateway that returns sample text without setting `demo: true` cannot be
+detected, so anyone who deploys their own stand-in gateway must set it.
 
 ## Viewer and embed
 

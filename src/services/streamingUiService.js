@@ -193,6 +193,14 @@ export const streamingUiService = {
         margin-bottom: 16px;
         color: #ff9f9f;
       }
+      .demo-banner {
+        background: rgba(255,200,80,0.14);
+        border: 1px solid rgba(255,200,80,0.5);
+        border-radius: 10px;
+        padding: 14px;
+        margin-bottom: 16px;
+        color: #ffe2a3;
+      }
       .error-banner button {
         background: #1e80a6;
         color: #f4fbff;
@@ -235,6 +243,7 @@ export const streamingUiService = {
       <p class="muted">Stream: ${safeStreamId}</p>
       <p class="muted">Viewer Profile: ${safeViewerId || 'none'}</p>
       <div id="error-region" role="alert" aria-live="assertive"></div>
+      <div id="demo-region" role="status" aria-live="polite"></div>
       <div class="panel feedbackRow">
         <div>
           <span class="pill">Feedback</span>
@@ -290,6 +299,16 @@ export const streamingUiService = {
       function showError(msg, canRetry) {
         errorRegion.innerHTML = '<div class="error-banner">' + msg +
           (canRetry ? '<br><button onclick="location.reload()">Reload page</button>' : '') + '</div>';
+      }
+
+      // Sample text must never pass for a live transcription.
+      var demoShown = false;
+      function showDemoNotice() {
+        if (demoShown) return;
+        demoShown = true;
+        document.getElementById('demo-region').innerHTML = '<div class="demo-banner"><strong>Demo content.</strong> ' +
+          'The captions, audio descriptions and sign output on this page include sample text. ' +
+          'They are not a live transcription of this stream.</div>';
       }
 
       function clearError() {
@@ -419,6 +438,7 @@ export const streamingUiService = {
           renderCaptionsAndAudio();
           useTheme(signOverlay.theme);
           (signOverlay.segments || []).forEach(addSign);
+          if (captions.demo || signOverlay.demo || audio.demo) showDemoNotice();
           connStatus.textContent = 'Live updates unavailable. Reload the page to refresh.';
         } catch (err) {
           connStatus.textContent = 'Unavailable';
@@ -460,6 +480,7 @@ export const streamingUiService = {
             audioLines.upsert(data.audio_description);
             renderCaptionsAndAudio();
             connStatus.textContent = 'Live';
+            if (data.demo) showDemoNotice();
             if (data.sign && data.sign.gloss_tokens) {
               addSign(data.sign);
             }
@@ -477,6 +498,7 @@ export const streamingUiService = {
             (data.sign || []).forEach(addSign);
             if (!themeChosenHere) useTheme(data.sign_theme);
             renderCaptionsAndAudio();
+            if (data.demo) showDemoNotice();
             if (data.captions_interrupted) showCaptionsInterrupted();
           } else if (data.type === 'stream.stopped') {
             document.getElementById('captions').textContent += '\\n[stream stopped]';
@@ -721,7 +743,7 @@ export const streamingUiService = {
     panel.style.lineHeight = '1.4';
     panel.setAttribute('role', 'region');
     panel.setAttribute('aria-label', 'Accessibility overlay');
-    panel.innerHTML = '<strong>Accessibility Agent</strong><div id="a11y-overlay-caption" role="status" aria-live="polite">Connecting...</div><div style="margin-top:8px;"><a id="a11y-feedback-link" style="color:#8fe7ff;" target="_blank" rel="noopener">Feedback (opens in new tab)</a></div>';
+    panel.innerHTML = '<strong>Accessibility Agent</strong><div id="a11y-overlay-demo" role="note" hidden style="margin-top:4px;font-size:12px;color:#ffe2a3;">Demo content: sample text, not a live transcription.</div><div id="a11y-overlay-caption" role="status" aria-live="polite">Connecting...</div><div style="margin-top:8px;"><a id="a11y-feedback-link" style="color:#8fe7ff;" target="_blank" rel="noopener">Feedback (opens in new tab)</a></div>';
     return panel;
   }
 
@@ -735,6 +757,7 @@ export const streamingUiService = {
     const panel = createPanel();
     document.body.appendChild(panel);
     const target = panel.querySelector('#a11y-overlay-caption');
+    const demoLabel = panel.querySelector('#a11y-overlay-demo');
     const feedbackLink = panel.querySelector('#a11y-feedback-link');
     const adSessionId = window.ACCESSIBILITY_AD_SESSION_ID || '';
     feedbackLink.href = window.location.origin + '/feedback?streamId=' + encodeURIComponent(streamId) + '&source=overlay&adSessionId=' + encodeURIComponent(adSessionId);
@@ -756,6 +779,7 @@ export const streamingUiService = {
     sse.onmessage = function (e) {
       try {
         const data = JSON.parse(e.data);
+        if (data.demo) demoLabel.hidden = false;
         if (data.type === 'segment' || data.type === 'caption.translation') {
           buffer.upsert(data.segment);
           renderCaption();
@@ -789,6 +813,7 @@ export const streamingUiService = {
         }
         return r.json();
       }).then((payload) => {
+        if (payload.demo) demoLabel.hidden = false;
         payload.captions.forEach(segment => buffer.upsert(segment));
         if (buffer.values().length) renderCaption();
         else target.textContent = 'No captions available yet.';

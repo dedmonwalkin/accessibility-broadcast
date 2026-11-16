@@ -298,6 +298,13 @@ function resolveViewerPreferences(streamId, viewerId) {
   return viewer.preferences;
 }
 
+// Demo content is anything that was not produced from the stream's own audio:
+// output of the mock provider, a scripted start timeline, or an answer from a
+// gateway that says it is demo text. Viewers are told when a stream has any.
+function streamHasDemoContent(stream) {
+  return stream.contains_demo_content === true || stream.model_provider === 'mock';
+}
+
 // Model gateway failures are never papered over with mock output. The first
 // failure on a running stream opens one incident and tells connected viewers
 // that captions are interrupted; later failures update that incident.
@@ -390,7 +397,9 @@ async function runPipeline({ stream, timeline, providerConfig }) {
       stream_id: stream.id,
       segment: toCaptionSegment(accessibility),
       audio_description: toAudioDescriptionSegment(accessibility),
-      sign
+      sign,
+      // Everything run at start comes from a script, not from audio.
+      demo: true
     });
   }
 
@@ -510,7 +519,10 @@ export const streamingService = {
       throw error;
     }
     // With nothing to process the provider was not called, so its status stays as it was.
-    if (timeline.length) recordModelProviderSuccess(stream);
+    if (timeline.length) {
+      recordModelProviderSuccess(stream);
+      stream.contains_demo_content = true;
+    }
     outputs.events = generated.events;
     outputs.captions = generated.captions;
     outputs.captionTranslations = {};
@@ -607,8 +619,10 @@ export const streamingService = {
       throw error;
     }
     recordModelProviderSuccess(stream);
+    const demo = stream.model_provider === 'mock' || transcription.demo === true;
 
     if (stream.status !== 'running') throw clientError('stream_not_running', 'Stream stopped while processing chunk');
+    if (demo) stream.contains_demo_content = true;
     outputs.events.push(accessibility);
     const captionSegment = toCaptionSegment(accessibility);
     const audioSegment = toAudioDescriptionSegment(accessibility);
@@ -639,7 +653,8 @@ export const streamingService = {
       stream_id: id,
       segment: captionSegment,
       audio_description: audioSegment,
-      sign
+      sign,
+      demo
     });
 
     await translateAndPublish(stream, outputs, [captionSegment]);
@@ -655,6 +670,7 @@ export const streamingService = {
       segment: captionSegment,
       audio_description: audioSegment,
       sign,
+      demo,
       transcript_confidence: transcription.confidence
     };
   },
@@ -692,6 +708,7 @@ export const streamingService = {
     if (normalized === 'ttml') {
       return {
         stream_id: id,
+        demo: streamHasDemoContent(stream),
         viewer_id: options.viewer_id || null,
         language: targetLanguage,
         caption_style: captionStyle,
@@ -704,6 +721,7 @@ export const streamingService = {
 
     return {
       stream_id: id,
+      demo: streamHasDemoContent(stream),
       viewer_id: options.viewer_id || null,
       language: targetLanguage,
       caption_style: captionStyle,
@@ -715,7 +733,7 @@ export const streamingService = {
   },
 
   getAudioDescription(id, options = {}) {
-    assertStream(id);
+    const stream = assertStream(id);
     const viewer = resolveViewerPreferences(id, options.viewer_id);
     const outputs = store.streamOutputs.get(id) || { audioDescription: [] };
     const audioDescriptionStyle = SUPPORTED_AUDIO_DESCRIPTION_STYLES.includes(viewer?.audio_description_style)
@@ -725,6 +743,7 @@ export const streamingService = {
 
     return {
       stream_id: id,
+      demo: streamHasDemoContent(stream),
       viewer_id: options.viewer_id || null,
       track_kind: 'audio_description',
       audio_description_style: audioDescriptionStyle,
@@ -753,6 +772,7 @@ export const streamingService = {
 
     return {
       stream_id: id,
+      demo: streamHasDemoContent(stream),
       viewer_id: options.viewer_id || null,
       sign_language: signLanguage,
       signer_profile: signerProfile,
@@ -765,6 +785,10 @@ export const streamingService = {
       sign_cards: outputs.signCards || [],
       render_strategy: signPresentationMode === 'basic_signs_book' ? 'book_sign_cards' : 'avatar_2d'
     };
+  },
+
+  isDemoStream(id) {
+    return streamHasDemoContent(assertStream(id));
   },
 
   isCaptioningInterrupted(id) {
@@ -786,6 +810,7 @@ export const streamingService = {
 
     return {
       stream_id: id,
+      demo: streamHasDemoContent(stream),
       status: stream.status,
       target_latency_seconds: stream.target_latency_seconds,
       model_provider: stream.model_provider,
