@@ -9,3 +9,18 @@ export function clientError(code, message, details) {
   if (details) err.details = details;
   return err;
 }
+
+// Errors caused by a service this server depends on (the model gateway being
+// down, or configured wrongly). Returned as HTTP 502/503 with the stable
+// `code` and optional `details`, and logged server-side with the message.
+export function upstreamError(code, message, statusCode = 502, details) {
+  const err = new Error(message || code);
+  err.statusCode = statusCode;
+  err.code = code;
+  if (details) err.details = details;
+  return err;
+}
+
+export function isModelProviderError(error) {
+  return typeof error?.code === 'string' && error.code.startsWith('model_provider_');
+}

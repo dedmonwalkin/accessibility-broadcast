@@ -17,6 +17,7 @@ import { adIntegrationService } from './services/adIntegrationService.js';
 import { accessibilityService } from './services/accessibilityService.js';
 import { streamingUiService } from './services/streamingUiService.js';
 import { streamEmitter } from './services/streamingService.js';
+import { createModelProvider } from './services/providers/modelProvider.js';
 import { persistenceService } from './services/persistence/persistenceService.js';
 import { cleanupService } from './services/cleanupService.js';
 import { buildErrorPage, buildLandingPage } from './services/uiShared.js';
@@ -368,7 +369,8 @@ async function route(req, res) {
       streamEmitter.on(eventKey, onEvent);
       res.write(`data: ${JSON.stringify({
         type: 'snapshot', stream_id: streamSse.id, captions: captions.captions,
-        audio_description: audio.segments, sign: sign.segments, sign_theme: sign.theme
+        audio_description: audio.segments, sign: sign.segments, sign_theme: sign.theme,
+        captions_interrupted: streamingService.isCaptioningInterrupted(streamSse.id)
       })}\n\n`);
       let closed = false;
       const cleanup = () => {
@@ -608,6 +610,20 @@ function handleError(req, res, error, requestId) {
     const details = error.details && typeof error.details === 'object' ? error.details : {};
     return sendJson(res, status, { ...details, error: code });
   }
+  if ((status === 502 || status === 503) && code) {
+    // A dependency (for example the model gateway) failed or is misconfigured.
+    // The caller gets the stable code; the message is logged for operators.
+    // eslint-disable-next-line no-console
+    console.error(JSON.stringify({
+      ts: new Date().toISOString(),
+      level: 'error',
+      requestId,
+      code,
+      message: error?.message
+    }));
+    const details = error.details && typeof error.details === 'object' ? error.details : {};
+    return sendJson(res, status, { ...details, error: code, request_id: requestId });
+  }
   // Internal errors: log server-side, return generic.
   // eslint-disable-next-line no-console
   console.error(JSON.stringify({
@@ -625,7 +641,26 @@ function handleError(req, res, error, requestId) {
 
 const server = http.createServer(route);
 
+// Says at boot what would otherwise only show up on the first live request.
+function reportModelProviderConfig() {
+  const configured = String(process.env.MODEL_PROVIDER || 'mock').toLowerCase();
+  const warn = (message) => {
+    // eslint-disable-next-line no-console
+    console.warn(JSON.stringify({ ts: new Date().toISOString(), level: 'warn', message }));
+  };
+  if (configured === 'http') {
+    try {
+      createModelProvider({ provider: 'http' });
+    } catch (error) {
+      warn(`Model provider is misconfigured: ${error.message}. Streams that use it will fail with ${error.code} until this is fixed.`);
+    }
+  } else if (process.env.NODE_ENV === 'production') {
+    warn('MODEL_PROVIDER is mock: caption, audio description and sign output is canned demo text, not real transcription.');
+  }
+}
+
 export async function startServer(port = PORT) {
+  reportModelProviderConfig();
   await persistenceService.configure(runtime);
   await persistenceService.loadLatest();
 

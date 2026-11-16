@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { store } from '../data/store.js';
 import { assertRequired } from '../utils/validation.js';
-import { clientError } from '../utils/errors.js';
+import { clientError, isModelProviderError } from '../utils/errors.js';
 import { createModelProvider } from './providers/modelProvider.js';
 import { createTranslationProvider } from './providers/translationProvider.js';
 import { runtimeConfig } from '../config/runtime.js';
@@ -296,6 +296,72 @@ function resolveViewerPreferences(streamId, viewerId) {
   return viewer.preferences;
 }
 
+// Model gateway failures are never papered over with mock output. The first
+// failure on a running stream opens one incident and tells connected viewers
+// that captions are interrupted; later failures update that incident.
+function recordModelProviderFailure(stream, error) {
+  const now = store.nowIso();
+  const previous = stream.model_provider_status;
+  const alreadyInterrupted = previous?.state === 'interrupted';
+  const existingIncident = alreadyInterrupted ? store.incidents.get(previous.incident_id) : null;
+
+  let incidentId = existingIncident?.id || null;
+  if (existingIncident) {
+    existingIncident.failed_requests += 1;
+    existingIncident.last_error_at = now;
+    existingIncident.updatedAt = now;
+  } else if (stream.status === 'running') {
+    incidentId = store.nextId('incident');
+    store.incidents.set(incidentId, {
+      id: incidentId,
+      stream_id: stream.id,
+      segment_id: null,
+      reason: 'model_provider_error',
+      error_code: error.code,
+      operation: error.details?.operation || null,
+      severity: 'high',
+      status: 'open',
+      confidence: null,
+      failed_requests: 1,
+      last_error_at: now,
+      assigned_to: null,
+      resolution: null,
+      createdAt: now,
+      updatedAt: now
+    });
+  }
+
+  stream.model_provider_status = {
+    state: 'interrupted',
+    error_code: error.code,
+    since: alreadyInterrupted ? previous.since : now,
+    last_error_at: now,
+    incident_id: incidentId
+  };
+  stream.updatedAt = now;
+
+  store.log('stream.model_provider.failed', {
+    streamId: stream.id,
+    errorCode: error.code,
+    operation: error.details?.operation || null,
+    incidentId
+  });
+
+  if (!alreadyInterrupted && stream.status === 'running') {
+    streamEmitter.emit(`stream:${stream.id}`, {
+      type: 'captions.interrupted',
+      stream_id: stream.id,
+      reason: error.code
+    });
+  }
+}
+
+function recordModelProviderSuccess(stream) {
+  const wasInterrupted = stream.model_provider_status?.state === 'interrupted';
+  stream.model_provider_status = { state: 'ok' };
+  if (wasInterrupted) store.log('stream.model_provider.recovered', { streamId: stream.id });
+}
+
 async function runPipeline({ stream, timeline, providerConfig }) {
   const provider = createModelProvider(providerConfig);
   const events = [];
@@ -388,6 +454,7 @@ export const streamingService = {
       throw clientError('unsupported_ingest_protocol', 'Unsupported ingest protocol. Use rtmp or srt.');
     }
 
+    const beforeStart = { status: stream.status, started_at: stream.started_at, ingest: stream.ingest };
     stream.ingest = {
       protocol,
       source_url: input.source_url,
@@ -418,7 +485,18 @@ export const streamingService = {
       input.sign_presentation_mode || stream.sign_presentation_mode
     );
     stream.accessibility_profiles = normalizeProfiles(input.accessibility_profiles || stream.accessibility_profiles);
-    const generated = await runPipeline({ stream, timeline, providerConfig });
+    let generated;
+    try {
+      generated = await runPipeline({ stream, timeline, providerConfig });
+    } catch (error) {
+      // A stream that could not produce output is not left looking live.
+      stream.status = beforeStart.status;
+      stream.started_at = beforeStart.started_at;
+      stream.ingest = beforeStart.ingest;
+      if (isModelProviderError(error)) recordModelProviderFailure(stream, error);
+      throw error;
+    }
+    recordModelProviderSuccess(stream);
     outputs.events = generated.events;
     outputs.captions = generated.captions;
     outputs.captionTranslations = {};
@@ -480,31 +558,41 @@ export const streamingService = {
     if (stream.status !== 'running') throw clientError('stream_not_running', 'Stream is not running');
 
     const providerConfig = { provider: stream.model_provider };
-    const provider = createModelProvider(providerConfig);
-
-    const transcription = await provider.transcribe({
-      audio_base64: input.audio_base64 || null,
-      format: input.format || 'wav',
-      language: input.language || stream.language || 'en',
-      duration_ms: input.duration_ms || 2000
-    });
-
-    const anchorMs = Date.now() - (input.duration_ms || 2000);
     const outputs = store.streamOutputs.get(id);
-    const timelineItem = asTimelineItem(
-      {
-        transcript: transcription.transcript,
-        scene: input.scene || transcription.scene || '',
-        speaker: input.speaker || 'unknown',
-        entities: input.entities || []
-      },
-      0,
-      anchorMs
-    );
+    let transcription;
+    let accessibility;
+    let sign;
+    try {
+      const provider = createModelProvider(providerConfig);
 
-    const perception = await provider.inferPerception({ timelineItem, stream });
-    const accessibility = await provider.inferAccessibility({ timelineItem, perception, stream });
-    const sign = await provider.inferSignScript({ accessibility, timelineItem, stream });
+      transcription = await provider.transcribe({
+        audio_base64: input.audio_base64 || null,
+        format: input.format || 'wav',
+        language: input.language || stream.language || 'en',
+        duration_ms: input.duration_ms || 2000
+      });
+
+      const anchorMs = Date.now() - (input.duration_ms || 2000);
+      const timelineItem = asTimelineItem(
+        {
+          transcript: transcription.transcript,
+          scene: input.scene || transcription.scene || '',
+          speaker: input.speaker || 'unknown',
+          entities: input.entities || []
+        },
+        0,
+        anchorMs
+      );
+
+      const perception = await provider.inferPerception({ timelineItem, stream });
+      accessibility = await provider.inferAccessibility({ timelineItem, perception, stream });
+      sign = await provider.inferSignScript({ accessibility, timelineItem, stream });
+    } catch (error) {
+      // Nothing is published for this chunk; see recordModelProviderFailure.
+      if (isModelProviderError(error)) recordModelProviderFailure(stream, error);
+      throw error;
+    }
+    recordModelProviderSuccess(stream);
 
     if (stream.status !== 'running') throw clientError('stream_not_running', 'Stream stopped while processing chunk');
     outputs.events.push(accessibility);
@@ -665,6 +753,11 @@ export const streamingService = {
     };
   },
 
+  isCaptioningInterrupted(id) {
+    const stream = assertStream(id);
+    return stream.status === 'running' && stream.model_provider_status?.state === 'interrupted';
+  },
+
   getHealth(id) {
     const stream = assertStream(id);
     const outputs = store.streamOutputs.get(id) || { events: [] };
@@ -682,6 +775,11 @@ export const streamingService = {
       status: stream.status,
       target_latency_seconds: stream.target_latency_seconds,
       model_provider: stream.model_provider,
+      // unknown until the provider has been called for this stream.
+      model_provider_status: stream.model_provider_status?.state || 'unknown',
+      captions_interrupted_since: stream.model_provider_status?.state === 'interrupted'
+        ? stream.model_provider_status.since
+        : null,
       output_languages: stream.output_languages || ['en-US'],
       sign_languages: stream.sign_languages || [stream.sign_language || 'ASL'],
       sign_presentation_mode: stream.sign_presentation_mode || 'avatar_2d',

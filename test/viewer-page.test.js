@@ -225,3 +225,47 @@ test('embed says the stream is not public when it cannot be opened without a key
 
   assert.equal(caption.textContent, 'Overlay error: this stream is not open for public viewing');
 });
+
+const NEXT_CAPTION = { ...CAPTION, id: 'seg-2', start: '2026-01-01T00:00:05.000Z', text: 'Item four is approved.' };
+const NOTICE = '[captions interrupted: the captioning service is not responding]';
+
+test('viewer says captions are interrupted when the captioning service fails, and clears it on the next caption', async () => {
+  const browser = makeBrowser({ streamStatus: 401 });
+  const sse = runViewer(browser);
+  await browser.settle();
+  sse.deliver(SNAPSHOT);
+  sse.deliver({ type: 'captions.interrupted', stream_id: 'stream-1', reason: 'model_provider_unavailable' });
+
+  assert.equal(browser.el('conn-status').textContent, 'Captions interrupted');
+  const during = browser.el('captions').textContent;
+  assert.match(during, /Welcome to the meeting\./, 'earlier captions stay on screen');
+  assert.ok(during.endsWith(NOTICE));
+  assert.equal(browser.el('error-region').innerHTML, '');
+
+  sse.deliver({ type: 'segment', stream_id: 'stream-1', segment: NEXT_CAPTION, audio_description: AUDIO });
+  assert.equal(browser.el('conn-status').textContent, 'Live');
+  const after = browser.el('captions').textContent;
+  assert.match(after, /Item four is approved\./);
+  assert.ok(!after.includes(NOTICE));
+});
+
+test('viewer joining during an interruption is told straight away', async () => {
+  const browser = makeBrowser({ streamStatus: 401 });
+  const sse = runViewer(browser);
+  await browser.settle();
+  sse.deliver({ ...SNAPSHOT, captions_interrupted: true });
+
+  assert.equal(browser.el('conn-status').textContent, 'Captions interrupted');
+  assert.ok(browser.el('captions').textContent.endsWith(NOTICE));
+});
+
+test('embed replaces a stale caption with an interruption notice until captions resume', async () => {
+  const browser = makeBrowser({ streamStatus: 401 });
+  const { sse, caption } = runEmbed(browser);
+  sse.deliver(SNAPSHOT);
+  sse.deliver({ type: 'captions.interrupted', stream_id: 'stream-1', reason: 'model_provider_unavailable' });
+  assert.equal(caption.textContent, '[captions interrupted]');
+
+  sse.deliver({ type: 'segment', stream_id: 'stream-1', segment: NEXT_CAPTION });
+  assert.match(caption.textContent, /Item four is approved\./);
+});

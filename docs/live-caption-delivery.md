@@ -34,6 +34,10 @@ cannot send an `Authorization` header. Subsequent frames are JSON data messages:
 
 - `segment`: original caption, audio-description metadata, sign script.
 - `caption.translation`: `stream_id`, `segment_id`, `target_language`, `segment`.
+- `captions.interrupted`: the model gateway failed for this stream; `reason` is
+  the error code. Sent once per interruption. The next `segment` means captions
+  have resumed. A snapshot taken during an interruption has
+  `captions_interrupted: true`.
 - `stream.stopped`: end the connection.
 
 Caption segments carry `language`, `target_language` and `translation_status`.
@@ -41,6 +45,26 @@ Pending translations in snapshots fall back per segment rather than omitting
 new originals. Translated rows retain source order when requests complete out
 of order. Translation storage is updated after stop but no late translation
 event is published to an ended stream.
+
+## Model gateway failures
+
+With `MODEL_PROVIDER=http`, a gateway that is unreachable, returns an error or
+returns an unusable body fails the request with HTTP 502
+`model_provider_unavailable` and the failing `operation`; a missing or rejected
+gateway URL fails it with HTTP 503 `model_provider_misconfigured`. Mock output
+is never substituted, so nothing is published for that chunk. All four model
+calls for a chunk must succeed; a chunk is not published with some outputs
+missing. A stream cannot be started while its gateway is failing.
+
+The first failure on a running stream opens one high-severity
+`model_provider_error` incident (later failures update its `failed_requests`
+and `last_error_at`), sets `model_provider_status: interrupted` on the stream
+health response and sends `captions.interrupted` to viewers. The viewer page and
+embed show that captions are interrupted until the next caption arrives, so a
+gap is not mistaken for silence.
+
+The `mock` provider is unchanged: it is the default, it returns canned demo
+text, and its output is not labelled in the viewer.
 
 ## Viewer and embed
 
@@ -68,8 +92,7 @@ stopping mid-translation, client merge behavior, actual HTTP SSE delivery and
 reconnection, and validation before opening a stream. Translation requests in
 tests are mocked; no external provider or Postgres integration is implied.
 
-The existing public-browser/protected-JSON auth design, model fallback provenance,
-SSE backpressure, server memory retention, source media transports, sign-language
+The existing public-browser/protected-JSON auth design, SSE backpressure, server memory retention, source media transports, sign-language
 generation quality and multi-instance delivery remain separate work. No API key
 was exposed in browser code or auth rule broadened by this change.
 
