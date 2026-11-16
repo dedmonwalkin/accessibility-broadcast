@@ -349,6 +349,17 @@ export const streamingUiService = {
         if (empty) empty.remove();
       }
 
+      // Shown when the captioning service stops responding, so a gap in the
+      // captions is not mistaken for silence. Cleared by the next caption.
+      function showCaptionsInterrupted() {
+        connStatus.textContent = 'Captions interrupted';
+        var captionsEl = document.getElementById('captions');
+        var notice = '[captions interrupted: the captioning service is not responding]';
+        if (captionsEl.textContent.indexOf(notice) === -1) {
+          captionsEl.textContent = (captionLines.text() ? captionLines.text() + '\\n' : '') + notice;
+        }
+      }
+
       function renderCaptionsAndAudio() {
         document.getElementById('captions').textContent = captionLines.text() || 'Waiting for captions...';
         document.getElementById('audio').textContent = audioLines.text() || 'Waiting for audio-description segments...';
@@ -448,9 +459,12 @@ export const streamingUiService = {
             captionLines.upsert(data.segment);
             audioLines.upsert(data.audio_description);
             renderCaptionsAndAudio();
+            connStatus.textContent = 'Live';
             if (data.sign && data.sign.gloss_tokens) {
               addSign(data.sign);
             }
+          } else if (data.type === 'captions.interrupted') {
+            showCaptionsInterrupted();
           } else if (data.type === 'caption.translation') {
             captionLines.upsert(data.segment);
             renderCaptionsAndAudio();
@@ -463,6 +477,7 @@ export const streamingUiService = {
             (data.sign || []).forEach(addSign);
             if (!themeChosenHere) useTheme(data.sign_theme);
             renderCaptionsAndAudio();
+            if (data.captions_interrupted) showCaptionsInterrupted();
           } else if (data.type === 'stream.stopped') {
             document.getElementById('captions').textContent += '\\n[stream stopped]';
             connStatus.textContent = 'Stream ended';
@@ -744,10 +759,13 @@ export const streamingUiService = {
         if (data.type === 'segment' || data.type === 'caption.translation') {
           buffer.upsert(data.segment);
           renderCaption();
+        } else if (data.type === 'captions.interrupted') {
+          target.textContent = '[captions interrupted]';
         } else if (data.type === 'snapshot') {
           gotSnapshot = true;
           data.captions.forEach(segment => buffer.upsert(segment));
           renderCaption();
+          if (data.captions_interrupted) target.textContent = '[captions interrupted]';
         } else if (data.type === 'stream.stopped') {
           target.textContent = '[stream ended]';
           ended = true;

@@ -40,6 +40,10 @@ paths:
             schema:
               $ref: '#/components/schemas/StartStreamRequest'
       responses:
+        '502':
+          description: The model gateway failed (error model_provider_unavailable, with the failing operation). The stream is not started and no output is produced.
+        '503':
+          description: The model gateway is not configured correctly (error model_provider_misconfigured, with a reason).
         '200':
           description: Stream started
           content:
@@ -80,10 +84,14 @@ paths:
       responses:
         '201':
           description: Segment generated and translation processing completed
+        '502':
+          description: The model gateway failed (error model_provider_unavailable, with the failing operation). Nothing is published for this chunk; mock output is never substituted. The first failure opens one model_provider_error incident and sends a captions.interrupted event to viewers.
+        '503':
+          description: The model gateway is not configured correctly (error model_provider_misconfigured, with a reason).
   /v1/streams/{id}/events/stream:
     get:
       summary: Receive personalized live output and translation updates
-      description: Starts with a snapshot (captions, audio_description, sign, sign_theme), then segment, caption.translation and stream.stopped JSON data messages. Caption updates merge by segment ID. See docs/live-caption-delivery.md.
+      description: Starts with a snapshot (captions, audio_description, sign, sign_theme, captions_interrupted), then segment, captions.interrupted, caption.translation and stream.stopped JSON data messages. Caption updates merge by segment ID. See docs/live-caption-delivery.md.
       parameters:
         - $ref: '#/components/parameters/StreamId'
         - in: query
@@ -175,7 +183,7 @@ paths:
         - $ref: '#/components/parameters/StreamId'
       responses:
         '200':
-          description: Stream health
+          description: Stream health. model_provider_status is unknown, ok or interrupted; captions_interrupted_since is set while interrupted.
   /v1/streams/{id}/feedback-summary:
     get:
       summary: Get feedback summary for stream

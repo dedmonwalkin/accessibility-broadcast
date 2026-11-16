@@ -85,3 +85,8 @@ Set:
 export MODEL_PROVIDER=http
 export MODEL_HTTP_BASE_URL=http://localhost:4011
 ```
+
+If the gateway is unreachable or misconfigured, requests fail with a typed
+error (`model_provider_unavailable` or `model_provider_misconfigured`) and no
+output is published; the server does not fall back to mock captions. See
+[docs/live-caption-delivery.md](docs/live-caption-delivery.md#model-gateway-failures).
